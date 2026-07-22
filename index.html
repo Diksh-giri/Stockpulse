@@ -6,34 +6,108 @@
 <title>StockPulse</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="page">
-    <div class="card">
+
+  <main class="upload-view" id="upload-view">
+    <section class="upload-panel">
       <div class="logo">
         <span class="logo-dot"></span>
         <span class="logo-text">StockPulse</span>
       </div>
 
+      <h1 class="headline">Know what needs attention.<br>Before it&rsquo;s too late.</h1>
+      <p class="subheading">Upload your morning inventory file.</p>
+
       <form id="upload-form">
         <label for="file-input" class="dropzone" id="dropzone">
           <input type="file" id="file-input" name="file" accept=".csv" hidden>
-          <svg class="dropzone-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 16V4M12 4L7 9M12 4L17 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M4 16V18C4 19.1046 4.89543 20 6 20H18C19.1046 20 20 19.1046 20 18V16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <p class="dropzone-text">Drag and drop your CSV here</p>
-          <p class="dropzone-subtext">or click to browse</p>
-          <p class="filename" id="filename"></p>
+
+          <div class="dropzone-idle" id="dropzone-idle">
+            <svg class="dropzone-icon" width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 16V4M12 4L7 9M12 4L17 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 16V18C4 19.1046 4.89543 20 6 20H18C19.1046 20 20 19.1046 20 18V16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <p class="dropzone-text">Drop your CSV here or browse</p>
+          </div>
+
+          <div class="dropzone-loading" id="dropzone-loading" hidden>
+            <div class="pulse-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <p class="loading-text">Scanning your inventory&hellip;</p>
+          </div>
         </label>
 
-        <button type="submit" class="btn" id="submit-btn" disabled>Check inventory</button>
-      </form>
+        <p class="filename" id="filename"></p>
+        <p class="error-message" id="error-message" hidden></p>
 
-      <p class="hint">Expects a CSV with: product_name, category, quantity_on_hand, reorder_threshold, reorder_quantity, expiration_date, sales_rate</p>
-    </div>
+        <button type="submit" class="btn-primary" id="submit-btn" disabled>Check inventory</button>
+
+        <p class="help-text">Requires: product_name, category, quantity_on_hand, reorder_threshold, reorder_quantity, expiration_date, sales_rate</p>
+        <button type="button" class="link-btn" id="download-sample-btn">Download sample CSV</button>
+      </form>
+    </section>
+
+    <aside class="preview-panel" aria-hidden="true">
+      <p class="preview-label">Example output</p>
+      <div class="preview-content">
+        <div class="preview-card preview-card--restock">
+          <div class="preview-card-main">
+            <p class="preview-card-name">Whole Milk 1L</p>
+            <p class="preview-card-category">Milk</p>
+            <p class="preview-card-reason">Runs out in 3 days. Order 100 units.</p>
+          </div>
+          <p class="preview-card-value">100<span>units</span></p>
+        </div>
+        <div class="preview-card preview-card--clear">
+          <div class="preview-card-main">
+            <p class="preview-card-name">Heavy Cream 500ml</p>
+            <p class="preview-card-category">Cream</p>
+            <p class="preview-card-reason">41 units expire in 4 days before they sell.</p>
+          </div>
+          <p class="preview-card-value">4<span>days left</span></p>
+        </div>
+        <div class="preview-card preview-card--hold">
+          <div class="preview-card-main">
+            <p class="preview-card-name">Skim Milk 1L</p>
+            <p class="preview-card-category">Milk</p>
+            <p class="preview-card-reason">24 days of stock. Skip reorder this cycle.</p>
+          </div>
+          <p class="preview-card-value">24<span>days</span></p>
+        </div>
+      </div>
+    </aside>
   </main>
+
+  <div class="results-view" id="results-view" hidden>
+    <header class="results-topbar">
+      <div class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">StockPulse</span>
+      </div>
+
+      <div class="results-summary">
+        <p class="results-count" id="results-count"></p>
+        <p class="results-meta" id="results-meta"></p>
+      </div>
+
+      <button type="button" class="btn-ghost" id="new-upload-btn">New upload</button>
+    </header>
+
+    <main class="results-main">
+      <div class="results-feed" id="results-feed"></div>
+      <div class="empty-state" id="empty-state" hidden>
+        <p class="empty-headline">You&rsquo;re on top of it.</p>
+        <p class="empty-subtext">Nothing needs attention today. Come back tomorrow with your updated file.</p>
+      </div>
+    </main>
+
+    <footer class="results-footer" id="results-footer" hidden></footer>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>
