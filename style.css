@@ -1,0 +1,145 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: #F5F4F1;
+  color: #1A1A1A;
+  min-height: 100vh;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: #FFFFFF;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+  padding: 32px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.logo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1B4332;
+  flex-shrink: 0;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1A1A1A;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+  padding: 32px 16px;
+  border: 2px dashed #C9C7C2;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.dropzone:hover {
+  border-color: #1B4332;
+}
+
+.dropzone.dragover {
+  border-style: solid;
+  border-color: #1B4332;
+  background-color: rgba(27, 67, 50, 0.04);
+}
+
+.dropzone-icon {
+  color: #888888;
+  margin-bottom: 8px;
+}
+
+.dropzone-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1A1A1A;
+}
+
+.dropzone-subtext {
+  font-size: 13px;
+  color: #888888;
+}
+
+.filename {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1B4332;
+  margin-top: 8px;
+  word-break: break-all;
+}
+
+.filename:empty {
+  display: none;
+}
+
+.btn {
+  width: 100%;
+  margin-top: 20px;
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  background: #1B4332;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #163a2a;
+}
+
+.btn:disabled {
+  background: #E4E2DE;
+  color: #ABA9A4;
+  cursor: not-allowed;
+}
+
+.hint {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #888888;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 24px 20px;
+  }
+
+  .dropzone {
+    padding: 24px 12px;
+  }
+}

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StockPulse</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page">
+    <div class="card">
+      <div class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">StockPulse</span>
+      </div>
+
+      <form id="upload-form">
+        <label for="file-input" class="dropzone" id="dropzone">
+          <input type="file" id="file-input" name="file" accept=".csv" hidden>
+          <svg class="dropzone-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 16V4M12 4L7 9M12 4L17 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4 16V18C4 19.1046 4.89543 20 6 20H18C19.1046 20 20 19.1046 20 18V16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <p class="dropzone-text">Drag and drop your CSV here</p>
+          <p class="dropzone-subtext">or click to browse</p>
+          <p class="filename" id="filename"></p>
+        </label>
+
+        <button type="submit" class="btn" id="submit-btn" disabled>Check inventory</button>
+      </form>
+
+      <p class="hint">Expects a CSV with: product_name, category, quantity_on_hand, reorder_threshold, reorder_quantity, expiration_date, sales_rate</p>
+    </div>
+  </main>
+</body>
+</html>
