@@ -14,6 +14,12 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const MIN_LOADING_MS = 1000;
 const VIEW_TRANSITION_MS = 300;
 
+const SECTION_DESCRIPTIONS = {
+  RESTOCK: "Running low on stock — order more before it runs out.",
+  CLEAR: "Won't sell through before it expires — move or discount it now.",
+  HOLD: "Well stocked for the cycle ahead — skip reordering for now.",
+};
+
 const SAMPLE_CSV = `product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate
 Whole Milk 1L,Milk,40,50,100,2026-07-25,8
 Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3
@@ -401,22 +407,65 @@ function buildResultCard(sectionClassName, item) {
   return card;
 }
 
-function buildSection(key, label, items) {
-  const section = document.createElement('div');
-  section.className = `results-section results-section--${key.toLowerCase()}`;
+function buildSectionPanel(key, items) {
+  const panel = document.createElement('div');
+  panel.className = `results-panel results-panel--${key.toLowerCase()}`;
 
-  const header = document.createElement('div');
-  header.className = 'results-section-header';
-  const dot = document.createElement('span');
-  dot.className = 'results-section-dot';
-  const labelEl = document.createElement('span');
-  labelEl.textContent = `${label} (${items.length})`;
-  header.appendChild(dot);
-  header.appendChild(labelEl);
-  section.appendChild(header);
+  const description = document.createElement('p');
+  description.className = 'results-panel-description';
+  description.textContent = SECTION_DESCRIPTIONS[key];
+  panel.appendChild(description);
 
-  items.forEach((item) => section.appendChild(buildResultCard(key.toLowerCase(), item)));
-  return section;
+  items.forEach((item) => panel.appendChild(buildResultCard(key.toLowerCase(), item)));
+  return panel;
+}
+
+function activateTab(tabsBar, panelsWrap, key) {
+  tabsBar.querySelectorAll('.results-tab').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.section === key);
+  });
+  panelsWrap.querySelectorAll('.results-panel').forEach((panel) => {
+    panel.hidden = panel.dataset.section !== key;
+  });
+}
+
+function buildResultsTabs(sections) {
+  const tabsBar = document.createElement('div');
+  tabsBar.className = 'results-tabs';
+  const panelsWrap = document.createElement('div');
+  panelsWrap.className = 'results-panels';
+
+  sections.forEach(({ key, label, items }) => {
+    const tabBtn = document.createElement('button');
+    tabBtn.type = 'button';
+    tabBtn.className = `results-tab results-tab--${key.toLowerCase()}`;
+    tabBtn.dataset.section = key;
+
+    const dot = document.createElement('span');
+    dot.className = 'results-tab-dot';
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    const count = document.createElement('span');
+    count.className = 'results-tab-count';
+    count.textContent = items.length;
+
+    tabBtn.appendChild(dot);
+    tabBtn.appendChild(labelEl);
+    tabBtn.appendChild(count);
+    tabBtn.addEventListener('click', () => activateTab(tabsBar, panelsWrap, key));
+    tabsBar.appendChild(tabBtn);
+
+    const panel = buildSectionPanel(key, items);
+    panel.dataset.section = key;
+    panelsWrap.appendChild(panel);
+  });
+
+  activateTab(tabsBar, panelsWrap, sections[0].key);
+
+  const wrapper = document.createElement('div');
+  wrapper.appendChild(tabsBar);
+  wrapper.appendChild(panelsWrap);
+  return wrapper;
 }
 
 function updateFooter() {
@@ -457,17 +506,12 @@ function renderResults(grouped, totalScanned) {
   resultsFooter.hidden = false;
 
   const sections = [
-    { key: 'RESTOCK', label: 'Restock' },
-    { key: 'CLEAR', label: 'Clear' },
-    { key: 'HOLD', label: 'Hold' },
-  ];
+    { key: 'RESTOCK', label: 'Restock', items: grouped.RESTOCK },
+    { key: 'CLEAR', label: 'Clear', items: grouped.CLEAR },
+    { key: 'HOLD', label: 'Hold', items: grouped.HOLD },
+  ].filter((section) => section.items.length > 0);
 
-  sections.forEach(({ key, label }) => {
-    const items = grouped[key];
-    if (items.length > 0) {
-      resultsFeed.appendChild(buildSection(key, label, items));
-    }
-  });
+  resultsFeed.appendChild(buildResultsTabs(sections));
 
   updateFooter();
 }

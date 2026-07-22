@@ -325,38 +325,84 @@ button, input {
   padding: 28px 20px 100px;
 }
 
-.results-section {
-  margin-bottom: 28px;
+.results-tabs {
+  display: flex;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
 }
 
-.results-section-header {
+.results-tab {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  font-size: 12px;
+  gap: 7px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 4px;
+  margin-right: 24px;
+  font-size: 13px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-.results-section-dot {
-  width: 8px;
-  height: 8px;
+.results-tab:hover {
+  color: var(--text);
+}
+
+.results-tab-dot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
 }
 
-.results-section--restock .results-section-dot {
+.results-tab-count {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.results-tab--restock .results-tab-dot {
   background: var(--restock);
 }
 
-.results-section--clear .results-section-dot {
+.results-tab--clear .results-tab-dot {
   background: var(--clear);
 }
 
-.results-section--hold .results-section-dot {
+.results-tab--hold .results-tab-dot {
   background: var(--hold);
+}
+
+.results-tab.is-active {
+  color: var(--text);
+}
+
+.results-tab.is-active .results-tab-dot {
+  opacity: 1;
+}
+
+.results-tab--restock.is-active {
+  border-bottom-color: var(--restock);
+}
+
+.results-tab--clear.is-active {
+  border-bottom-color: var(--clear);
+}
+
+.results-tab--hold.is-active {
+  border-bottom-color: var(--hold);
+}
+
+.results-panel-description {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
 }
 
 .result-card {
@@ -376,15 +422,15 @@ button, input {
   gap: 16px;
 }
 
-.results-section--restock .result-card {
+.results-panel--restock .result-card {
   border-left-color: var(--restock);
 }
 
-.results-section--clear .result-card {
+.results-panel--clear .result-card {
   border-left-color: var(--clear);
 }
 
-.results-section--hold .result-card {
+.results-panel--hold .result-card {
   border-left-color: var(--hold);
 }
 
