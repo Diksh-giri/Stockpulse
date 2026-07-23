@@ -1,11 +1,12 @@
-product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate
-Whole Milk 1L,Milk,40,50,100,2026-07-25,8
-Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3
-Heavy Cream 500ml,Cream,45,20,50,2026-07-26,1
-Skim Milk 1L,Milk,120,50,100,2026-08-10,5
-Salted Butter 250g,Butter,55,10,30,2026-09-05,3
-Cheddar Cheese 500g,Cheese,10,15,40,2026-08-20,2
-Mozzarella 250g,Cheese,90,20,50,2026-08-18,3
-Whipping Cream 250ml,Cream,80,25,60,2026-08-05,6
-Unsalted Butter 250g,Butter,8,10,30,2026-09-01,2
-Strawberry Yogurt 200g,Yogurt,200,30,80,2026-08-15,4
+product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate,lot_number,storage_bin
+Whole Milk 1L,Milk,40,50,100,2026-07-25,8,LOT-2026-A01,BIN-A1
+Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3,LOT-2026-A02,BIN-A2
+Heavy Cream 500ml,Cream,45,20,50,2026-07-26,1,LOT-2026-A03,BIN-A3
+Skim Milk 1L,Milk,80,50,100,2026-08-17,5,LOT-2026-B01,BIN-B1
+Skim Milk 1L,Milk,40,50,100,2026-07-28,5,LOT-2026-B02,BIN-B2
+Salted Butter 250g,Butter,55,10,30,2026-09-05,3,LOT-2026-A04,BIN-A4
+Cheddar Cheese 500g,Cheese,10,15,40,2026-08-20,2,LOT-2026-A05,BIN-A5
+Mozzarella 250g,Cheese,90,20,50,2026-08-18,3,LOT-2026-A06,BIN-A6
+Whipping Cream 250ml,Cream,80,25,60,2026-08-05,6,LOT-2026-A07,BIN-A7
+Unsalted Butter 250g,Butter,8,10,30,2026-09-01,2,LOT-2026-A08,BIN-A8
+Strawberry Yogurt 200g,Yogurt,200,30,80,2026-08-15,4,LOT-2026-A09,BIN-A9

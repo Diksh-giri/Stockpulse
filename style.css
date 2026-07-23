@@ -8,6 +8,7 @@
   --restock: #B91C1C;
   --clear: #C2410C;
   --hold: #92400E;
+  --yellow: #B45309;
 }
 
 * {
@@ -399,6 +400,80 @@ button, input {
   border-bottom-color: var(--hold);
 }
 
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid transparent;
+  border-radius: 12px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.summary-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.summary-card:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.summary-card--restock {
+  border-top-color: var(--restock);
+}
+
+.summary-card--clear {
+  border-top-color: var(--clear);
+}
+
+.summary-card--hold {
+  border-top-color: var(--hold);
+}
+
+.summary-card-count {
+  font-family: 'Fraunces', serif;
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.summary-card-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.product-name-btn {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.product-name-btn:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.result-card-lot {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: -4px 0 8px;
+}
+
 .results-panel-description {
   font-size: 13px;
   color: var(--text-muted);
@@ -602,6 +677,124 @@ button, input {
   font-weight: 500;
   color: var(--text);
   margin-bottom: 2px;
+}
+
+/* Product detail view (FEFO Matrix) */
+
+.product-view {
+  min-height: 100vh;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.fefo-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.fefo-section-label--table {
+  margin-top: 28px;
+}
+
+.fefo-bar {
+  display: flex;
+  width: 100%;
+  height: 28px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.fefo-bar-segment {
+  height: 100%;
+}
+
+.fefo-bar-segment--red {
+  background: var(--restock);
+}
+
+.fefo-bar-segment--yellow {
+  background: var(--yellow);
+}
+
+.fefo-bar-segment--green {
+  background: var(--green);
+}
+
+.fefo-bar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.fefo-bar-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.lot-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.lot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.lot-table th,
+.lot-table td {
+  text-align: left;
+  padding: 12px 16px;
+  white-space: nowrap;
+}
+
+.lot-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+
+.lot-table tbody tr:not(:last-child) td {
+  border-bottom: 1px solid var(--border);
+}
+
+.bucket-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.bucket-badge--red {
+  background: var(--restock);
+}
+
+.bucket-badge--yellow {
+  background: var(--yellow);
+}
+
+.bucket-badge--green {
+  background: var(--green);
 }
 
 /* Desktop layout */

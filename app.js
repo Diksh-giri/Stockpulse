@@ -10,6 +10,8 @@ const REQUIRED_COLUMNS = [
 
 const RESTOCK_DAYS_THRESHOLD = 5;
 const CLEAR_DAYS_THRESHOLD = 7;
+const FEFO_RED_MAX_DAYS = 2;
+const FEFO_YELLOW_MAX_DAYS = 7;
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const MIN_LOADING_MS = 1000;
 const VIEW_TRANSITION_MS = 300;
@@ -20,17 +22,18 @@ const SECTION_DESCRIPTIONS = {
   HOLD: "Well stocked for the cycle ahead — skip reordering for now.",
 };
 
-const SAMPLE_CSV = `product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate
-Whole Milk 1L,Milk,40,50,100,2026-07-25,8
-Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3
-Heavy Cream 500ml,Cream,45,20,50,2026-07-26,1
-Skim Milk 1L,Milk,120,50,100,2026-08-10,5
-Salted Butter 250g,Butter,55,10,30,2026-09-05,3
-Cheddar Cheese 500g,Cheese,10,15,40,2026-08-20,2
-Mozzarella 250g,Cheese,90,20,50,2026-08-18,3
-Whipping Cream 250ml,Cream,80,25,60,2026-08-05,6
-Unsalted Butter 250g,Butter,8,10,30,2026-09-01,2
-Strawberry Yogurt 200g,Yogurt,200,30,80,2026-08-15,4
+const SAMPLE_CSV = `product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate,lot_number,storage_bin
+Whole Milk 1L,Milk,40,50,100,2026-07-25,8,LOT-2026-A01,BIN-A1
+Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3,LOT-2026-A02,BIN-A2
+Heavy Cream 500ml,Cream,45,20,50,2026-07-26,1,LOT-2026-A03,BIN-A3
+Skim Milk 1L,Milk,80,50,100,2026-08-17,5,LOT-2026-B01,BIN-B1
+Skim Milk 1L,Milk,40,50,100,2026-07-28,5,LOT-2026-B02,BIN-B2
+Salted Butter 250g,Butter,55,10,30,2026-09-05,3,LOT-2026-A04,BIN-A4
+Cheddar Cheese 500g,Cheese,10,15,40,2026-08-20,2,LOT-2026-A05,BIN-A5
+Mozzarella 250g,Cheese,90,20,50,2026-08-18,3,LOT-2026-A06,BIN-A6
+Whipping Cream 250ml,Cream,80,25,60,2026-08-05,6,LOT-2026-A07,BIN-A7
+Unsalted Butter 250g,Butter,8,10,30,2026-09-01,2,LOT-2026-A08,BIN-A8
+Strawberry Yogurt 200g,Yogurt,200,30,80,2026-08-15,4,LOT-2026-A09,BIN-A9
 `;
 
 class AppError extends Error {}
@@ -52,11 +55,21 @@ const newUploadBtn = document.getElementById('new-upload-btn');
 const resultsCount = document.getElementById('results-count');
 const resultsMeta = document.getElementById('results-meta');
 const resultsFeed = document.getElementById('results-feed');
+const summaryCardsEl = document.getElementById('summary-cards');
 const emptyState = document.getElementById('empty-state');
 const resultsFooter = document.getElementById('results-footer');
 
+const productView = document.getElementById('product-view');
+const productViewName = document.getElementById('product-view-name');
+const productViewMeta = document.getElementById('product-view-meta');
+const fefoBar = document.getElementById('fefo-bar');
+const fefoBarLegend = document.getElementById('fefo-bar-legend');
+const lotTableWrap = document.getElementById('lot-table-wrap');
+const backToResultsBtn = document.getElementById('back-to-results-btn');
+
 let reviewedCount = 0;
 let totalFlaggedCount = 0;
+let currentCatalog = {};
 
 /* File selection */
 
@@ -157,6 +170,8 @@ function parseCSVText(text) {
     REQUIRED_COLUMNS.forEach((column) => {
       row[column] = values[indexByColumn[column]];
     });
+    row.lot_number = indexByColumn.lot_number !== undefined ? values[indexByColumn.lot_number] : `LOT-${i}`;
+    row.storage_bin = indexByColumn.storage_bin !== undefined ? values[indexByColumn.storage_bin] : '—';
 
     if (isValidRow(row)) rows.push(row);
   }
@@ -203,7 +218,12 @@ function evaluateProduct(row) {
   const unitsExpiringUnsold = quantityOnHand - salesRate * daysUntilExpiry;
   const normalCycle = reorderThreshold / salesRate;
 
-  const base = { productName: row.product_name, category: row.category };
+  const base = {
+    productName: row.product_name,
+    category: row.category,
+    lotNumber: row.lot_number,
+    storageBin: row.storage_bin,
+  };
 
   const inputRows = [
     { label: 'Quantity on hand', value: `${formatNumber(quantityOnHand)} units` },
@@ -278,6 +298,41 @@ function groupByFlag(rows) {
   return grouped;
 }
 
+/* FEFO catalog (per-product lot grouping) */
+
+function bucketForDays(days) {
+  if (days <= FEFO_RED_MAX_DAYS) return 'RED';
+  if (days <= FEFO_YELLOW_MAX_DAYS) return 'YELLOW';
+  return 'GREEN';
+}
+
+function buildCatalog(rows) {
+  const catalog = {};
+  rows.forEach((row) => {
+    const quantityOnHand = parseFloat(row.quantity_on_hand);
+    const daysUntilExpiry = (parseDateUTC(row.expiration_date) - todayUTC()) / MS_PER_DAY;
+
+    if (!catalog[row.product_name]) {
+      catalog[row.product_name] = { category: row.category, totalQuantity: 0, lots: [] };
+    }
+    catalog[row.product_name].totalQuantity += quantityOnHand;
+    catalog[row.product_name].lots.push({
+      lotNumber: row.lot_number,
+      storageBin: row.storage_bin,
+      quantityOnHand,
+      expirationDate: row.expiration_date,
+      daysUntilExpiry,
+      bucket: bucketForDays(daysUntilExpiry),
+    });
+  });
+
+  Object.values(catalog).forEach((product) => {
+    product.lots.sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
+  });
+
+  return catalog;
+}
+
 /* Formatting helpers */
 
 function formatScannedAt(date) {
@@ -328,9 +383,11 @@ function buildResultCard(sectionClassName, item) {
   const main = document.createElement('div');
   main.className = 'result-card-main';
 
-  const name = document.createElement('p');
-  name.className = 'result-card-name';
+  const name = document.createElement('button');
+  name.type = 'button';
+  name.className = 'result-card-name product-name-btn';
   name.textContent = item.productName;
+  name.addEventListener('click', () => showProductDetail(item.productName));
 
   const category = document.createElement('p');
   category.className = 'result-card-category';
@@ -353,6 +410,15 @@ function buildResultCard(sectionClassName, item) {
 
   main.appendChild(name);
   main.appendChild(category);
+
+  const product = currentCatalog[item.productName];
+  if (product && product.lots.length > 1) {
+    const lotBadge = document.createElement('p');
+    lotBadge.className = 'result-card-lot';
+    lotBadge.textContent = `Lot ${item.lotNumber} • Bin ${item.storageBin}`;
+    main.appendChild(lotBadge);
+  }
+
   main.appendChild(reason);
   main.appendChild(toggle);
 
@@ -468,6 +534,41 @@ function buildResultsTabs(sections) {
   return wrapper;
 }
 
+function renderSummaryCards(grouped) {
+  summaryCardsEl.innerHTML = '';
+
+  [
+    { key: 'RESTOCK', label: 'Restock', count: grouped.RESTOCK.length },
+    { key: 'CLEAR', label: 'Clear', count: grouped.CLEAR.length },
+    { key: 'HOLD', label: 'Hold', count: grouped.HOLD.length },
+  ].forEach(({ key, label, count }) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = `summary-card summary-card--${key.toLowerCase()}`;
+    card.disabled = count === 0;
+
+    const countEl = document.createElement('p');
+    countEl.className = 'summary-card-count';
+    countEl.textContent = count;
+
+    const labelEl = document.createElement('p');
+    labelEl.className = 'summary-card-label';
+    labelEl.textContent = label;
+
+    card.appendChild(countEl);
+    card.appendChild(labelEl);
+
+    if (count > 0) {
+      card.addEventListener('click', () => {
+        const tabBtn = resultsFeed.querySelector(`.results-tab[data-section="${key}"]`);
+        if (tabBtn) tabBtn.click();
+      });
+    }
+
+    summaryCardsEl.appendChild(card);
+  });
+}
+
 function updateFooter() {
   if (reviewedCount === totalFlaggedCount) {
     resultsFooter.classList.add('is-complete');
@@ -494,6 +595,7 @@ function renderResults(grouped, totalScanned) {
 
   if (totalFlaggedCount === 0) {
     resultsCount.textContent = "You're on top of it.";
+    summaryCardsEl.hidden = true;
     resultsFeed.hidden = true;
     emptyState.hidden = false;
     resultsFooter.hidden = true;
@@ -501,9 +603,12 @@ function renderResults(grouped, totalScanned) {
   }
 
   resultsCount.textContent = `${totalFlaggedCount} product${totalFlaggedCount === 1 ? '' : 's'} need attention.`;
+  summaryCardsEl.hidden = false;
   emptyState.hidden = true;
   resultsFeed.hidden = false;
   resultsFooter.hidden = false;
+
+  renderSummaryCards(grouped);
 
   const sections = [
     { key: 'RESTOCK', label: 'Restock', items: grouped.RESTOCK },
@@ -515,6 +620,98 @@ function renderResults(grouped, totalScanned) {
 
   updateFooter();
 }
+
+/* Product detail (FEFO Matrix) */
+
+function buildFefoBar(product) {
+  fefoBar.innerHTML = '';
+  fefoBarLegend.innerHTML = '';
+
+  const totals = { RED: 0, YELLOW: 0, GREEN: 0 };
+  product.lots.forEach((lot) => {
+    totals[lot.bucket] += lot.quantityOnHand;
+  });
+
+  ['RED', 'YELLOW', 'GREEN'].forEach((bucket) => {
+    const pct = product.totalQuantity > 0 ? (totals[bucket] / product.totalQuantity) * 100 : 0;
+    if (pct > 0) {
+      const segment = document.createElement('div');
+      segment.className = `fefo-bar-segment fefo-bar-segment--${bucket.toLowerCase()}`;
+      segment.style.width = `${pct}%`;
+      fefoBar.appendChild(segment);
+    }
+
+    const legendItem = document.createElement('span');
+    const dot = document.createElement('span');
+    dot.className = 'fefo-bar-legend-dot';
+    dot.style.background = `var(--${bucket === 'RED' ? 'restock' : bucket === 'YELLOW' ? 'yellow' : 'green'})`;
+    legendItem.appendChild(dot);
+    legendItem.appendChild(document.createTextNode(`${bucket === 'RED' ? 'Red' : bucket === 'YELLOW' ? 'Yellow' : 'Green'}: ${formatNumber(pct)}%`));
+    fefoBarLegend.appendChild(legendItem);
+  });
+}
+
+function buildLotTable(product) {
+  lotTableWrap.innerHTML = '';
+
+  const table = document.createElement('table');
+  table.className = 'lot-table';
+
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>Lot</th><th>Bin</th><th>Quantity</th><th>Expires</th><th>Days to expiry</th></tr>';
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  product.lots.forEach((lot) => {
+    const tr = document.createElement('tr');
+
+    const daysLabel = lot.daysUntilExpiry < 0
+      ? `Expired ${formatNumber(Math.abs(lot.daysUntilExpiry))}d ago`
+      : `${formatNumber(lot.daysUntilExpiry)} days`;
+
+    const badge = `<span class="bucket-badge bucket-badge--${lot.bucket.toLowerCase()}">${lot.bucket}</span>`;
+
+    const cells = [
+      lot.lotNumber,
+      lot.storageBin,
+      `${formatNumber(lot.quantityOnHand)} units`,
+      formatDateDisplay(lot.expirationDate),
+      `${daysLabel} ${badge}`,
+    ];
+
+    cells.forEach((html, i) => {
+      const td = document.createElement('td');
+      if (i === cells.length - 1) {
+        td.innerHTML = html;
+      } else {
+        td.textContent = html;
+      }
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  lotTableWrap.appendChild(table);
+}
+
+function showProductDetail(productName) {
+  const product = currentCatalog[productName];
+  if (!product) return;
+
+  productViewName.textContent = productName;
+  productViewMeta.textContent = `${product.category} • ${formatNumber(product.totalQuantity)} units across ${product.lots.length} lot${product.lots.length === 1 ? '' : 's'}`;
+
+  buildFefoBar(product);
+  buildLotTable(product);
+
+  switchView(resultsView, productView);
+}
+
+backToResultsBtn.addEventListener('click', () => {
+  switchView(productView, resultsView);
+});
 
 /* View + loading state */
 
@@ -570,6 +767,7 @@ uploadForm.addEventListener('submit', async (event) => {
     const text = await readFileAsText(file);
     const rows = parseCSVText(text);
     await minDelay;
+    currentCatalog = buildCatalog(rows);
     const grouped = groupByFlag(rows);
     renderResults(grouped, rows.length);
     stopLoading();

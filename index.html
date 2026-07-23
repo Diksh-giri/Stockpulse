@@ -98,6 +98,7 @@
     </header>
 
     <main class="results-main">
+      <div class="summary-cards" id="summary-cards"></div>
       <div class="results-feed" id="results-feed"></div>
       <div class="empty-state" id="empty-state" hidden>
         <p class="empty-headline">You&rsquo;re on top of it.</p>
@@ -106,6 +107,31 @@
     </main>
 
     <footer class="results-footer" id="results-footer" hidden></footer>
+  </div>
+
+  <div class="product-view" id="product-view" hidden>
+    <header class="results-topbar">
+      <div class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">StockPulse</span>
+      </div>
+
+      <div class="results-summary">
+        <p class="results-count" id="product-view-name"></p>
+        <p class="results-meta" id="product-view-meta"></p>
+      </div>
+
+      <button type="button" class="btn-ghost" id="back-to-results-btn">Back</button>
+    </header>
+
+    <main class="results-main">
+      <p class="fefo-section-label">Shelf life across active lots</p>
+      <div class="fefo-bar" id="fefo-bar"></div>
+      <div class="fefo-bar-legend" id="fefo-bar-legend"></div>
+
+      <p class="fefo-section-label fefo-section-label--table">Lot distribution (FEFO order)</p>
+      <div class="lot-table-wrap" id="lot-table-wrap"></div>
+    </main>
   </div>
 
   <script src="app.js"></script>
