@@ -99,6 +99,10 @@
 
     <main class="results-main">
       <div class="summary-cards" id="summary-cards"></div>
+      <div class="urgent-section" id="urgent-section" hidden>
+        <p class="fefo-section-label">Urgent lots requiring action</p>
+        <div class="lot-table-wrap" id="urgent-table-wrap"></div>
+      </div>
       <div class="results-feed" id="results-feed"></div>
       <div class="empty-state" id="empty-state" hidden>
         <p class="empty-headline">You&rsquo;re on top of it.</p>
@@ -121,7 +125,10 @@
         <p class="results-meta" id="product-view-meta"></p>
       </div>
 
-      <button type="button" class="btn-ghost" id="back-to-results-btn">Back</button>
+      <div class="product-view-actions">
+        <button type="button" class="btn-ghost" id="print-pick-list-btn">Print pick list</button>
+        <button type="button" class="btn-ghost" id="back-to-results-btn">Back</button>
+      </div>
     </header>
 
     <main class="results-main">

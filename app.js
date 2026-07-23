@@ -16,24 +16,30 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const MIN_LOADING_MS = 1000;
 const VIEW_TRANSITION_MS = 300;
 
+const STATUS_ICON_SVG = {
+  RESTOCK: '<svg class="status-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1.5L15 14H1L8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><line x1="8" y1="6" x2="8" y2="9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.5" r="0.8" fill="currentColor"/></svg>',
+  CLEAR: '<svg class="status-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.5V8L10.5 9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  HOLD: '<svg class="status-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8.5L6.5 12L13 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+
 const SECTION_DESCRIPTIONS = {
   RESTOCK: "Running low on stock — order more before it runs out.",
   CLEAR: "Won't sell through before it expires — move or discount it now.",
   HOLD: "Well stocked for the cycle ahead — skip reordering for now.",
 };
 
-const SAMPLE_CSV = `product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate,lot_number,storage_bin
-Whole Milk 1L,Milk,40,50,100,2026-07-25,8,LOT-2026-A01,BIN-A1
-Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3,LOT-2026-A02,BIN-A2
-Heavy Cream 500ml,Cream,45,20,50,2026-07-26,1,LOT-2026-A03,BIN-A3
-Skim Milk 1L,Milk,80,50,100,2026-08-17,5,LOT-2026-B01,BIN-B1
-Skim Milk 1L,Milk,40,50,100,2026-07-28,5,LOT-2026-B02,BIN-B2
-Salted Butter 250g,Butter,55,10,30,2026-09-05,3,LOT-2026-A04,BIN-A4
-Cheddar Cheese 500g,Cheese,10,15,40,2026-08-20,2,LOT-2026-A05,BIN-A5
-Mozzarella 250g,Cheese,90,20,50,2026-08-18,3,LOT-2026-A06,BIN-A6
-Whipping Cream 250ml,Cream,80,25,60,2026-08-05,6,LOT-2026-A07,BIN-A7
-Unsalted Butter 250g,Butter,8,10,30,2026-09-01,2,LOT-2026-A08,BIN-A8
-Strawberry Yogurt 200g,Yogurt,200,30,80,2026-08-15,4,LOT-2026-A09,BIN-A9
+const SAMPLE_CSV = `product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate,lot_number,storage_bin,unit_cost
+Whole Milk 1L,Milk,40,50,100,2026-07-25,8,LOT-2026-A01,BIN-A1,2.10
+Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3,LOT-2026-A02,BIN-A2,3.25
+Heavy Cream 500ml,Cream,45,20,50,2026-07-26,1,LOT-2026-A03,BIN-A3,2.80
+Skim Milk 1L,Milk,80,50,100,2026-08-17,5,LOT-2026-B01,BIN-B1,1.95
+Skim Milk 1L,Milk,40,50,100,2026-07-28,5,LOT-2026-B02,BIN-B2,1.95
+Salted Butter 250g,Butter,55,10,30,2026-09-05,3,LOT-2026-A04,BIN-A4,3.10
+Cheddar Cheese 500g,Cheese,10,15,40,2026-08-20,2,LOT-2026-A05,BIN-A5,4.50
+Mozzarella 250g,Cheese,90,20,50,2026-08-18,3,LOT-2026-A06,BIN-A6,3.75
+Whipping Cream 250ml,Cream,80,25,60,2026-08-05,6,LOT-2026-A07,BIN-A7,2.60
+Unsalted Butter 250g,Butter,8,10,30,2026-09-01,2,LOT-2026-A08,BIN-A8,3.10
+Strawberry Yogurt 200g,Yogurt,200,30,80,2026-08-15,4,LOT-2026-A09,BIN-A9,1.40
 `;
 
 class AppError extends Error {}
@@ -56,6 +62,8 @@ const resultsCount = document.getElementById('results-count');
 const resultsMeta = document.getElementById('results-meta');
 const resultsFeed = document.getElementById('results-feed');
 const summaryCardsEl = document.getElementById('summary-cards');
+const urgentSection = document.getElementById('urgent-section');
+const urgentTableWrap = document.getElementById('urgent-table-wrap');
 const emptyState = document.getElementById('empty-state');
 const resultsFooter = document.getElementById('results-footer');
 
@@ -66,6 +74,7 @@ const fefoBar = document.getElementById('fefo-bar');
 const fefoBarLegend = document.getElementById('fefo-bar-legend');
 const lotTableWrap = document.getElementById('lot-table-wrap');
 const backToResultsBtn = document.getElementById('back-to-results-btn');
+const printPickListBtn = document.getElementById('print-pick-list-btn');
 
 let reviewedCount = 0;
 let totalFlaggedCount = 0;
@@ -172,6 +181,7 @@ function parseCSVText(text) {
     });
     row.lot_number = indexByColumn.lot_number !== undefined ? values[indexByColumn.lot_number] : `LOT-${i}`;
     row.storage_bin = indexByColumn.storage_bin !== undefined ? values[indexByColumn.storage_bin] : '—';
+    row.unit_cost = indexByColumn.unit_cost !== undefined ? values[indexByColumn.unit_cost] : undefined;
 
     if (isValidRow(row)) rows.push(row);
   }
@@ -201,6 +211,10 @@ function formatNumber(value) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+function formatCurrency(value) {
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
 function formatDateDisplay(dateStr) {
   const [year, month, day] = dateStr.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -223,6 +237,9 @@ function evaluateProduct(row) {
     category: row.category,
     lotNumber: row.lot_number,
     storageBin: row.storage_bin,
+    quantityOnHand,
+    expirationDate: row.expiration_date,
+    daysUntilExpiry,
   };
 
   const inputRows = [
@@ -311,23 +328,31 @@ function buildCatalog(rows) {
   rows.forEach((row) => {
     const quantityOnHand = parseFloat(row.quantity_on_hand);
     const daysUntilExpiry = (parseDateUTC(row.expiration_date) - todayUTC()) / MS_PER_DAY;
+    const parsedCost = parseFloat(row.unit_cost);
+    const unitCost = Number.isFinite(parsedCost) ? parsedCost : null;
 
     if (!catalog[row.product_name]) {
-      catalog[row.product_name] = { category: row.category, totalQuantity: 0, lots: [] };
+      catalog[row.product_name] = { category: row.category, totalQuantity: 0, totalValue: 0, lots: [] };
     }
-    catalog[row.product_name].totalQuantity += quantityOnHand;
-    catalog[row.product_name].lots.push({
+    const product = catalog[row.product_name];
+    product.totalQuantity += quantityOnHand;
+    if (unitCost !== null) product.totalValue += quantityOnHand * unitCost;
+    product.lots.push({
       lotNumber: row.lot_number,
       storageBin: row.storage_bin,
       quantityOnHand,
       expirationDate: row.expiration_date,
       daysUntilExpiry,
       bucket: bucketForDays(daysUntilExpiry),
+      unitCost,
+      value: unitCost !== null ? quantityOnHand * unitCost : null,
     });
   });
 
   Object.values(catalog).forEach((product) => {
     product.lots.sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
+    product.hasAnyCost = product.lots.some((lot) => lot.unitCost !== null);
+    product.hasFullCost = product.lots.every((lot) => lot.unitCost !== null);
   });
 
   return catalog;
@@ -383,6 +408,10 @@ function buildResultCard(sectionClassName, item) {
   const main = document.createElement('div');
   main.className = 'result-card-main';
 
+  const statusLabel = document.createElement('p');
+  statusLabel.className = 'result-card-status';
+  statusLabel.innerHTML = `${STATUS_ICON_SVG[item.flag]}<span>${item.flag}</span>`;
+
   const name = document.createElement('button');
   name.type = 'button';
   name.className = 'result-card-name product-name-btn';
@@ -408,6 +437,7 @@ function buildResultCard(sectionClassName, item) {
   toggle.appendChild(toggleLabel);
   toggle.appendChild(toggleIcon);
 
+  main.appendChild(statusLabel);
   main.appendChild(name);
   main.appendChild(category);
 
@@ -553,7 +583,7 @@ function renderSummaryCards(grouped) {
 
     const labelEl = document.createElement('p');
     labelEl.className = 'summary-card-label';
-    labelEl.textContent = label;
+    labelEl.innerHTML = `${STATUS_ICON_SVG[key]}<span>${label}</span>`;
 
     card.appendChild(countEl);
     card.appendChild(labelEl);
@@ -567,6 +597,62 @@ function renderSummaryCards(grouped) {
 
     summaryCardsEl.appendChild(card);
   });
+}
+
+function renderUrgentTable(grouped) {
+  const urgentItems = [...grouped.RESTOCK, ...grouped.CLEAR]
+    .slice()
+    .sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
+
+  if (urgentItems.length === 0) {
+    urgentSection.hidden = true;
+    return;
+  }
+
+  urgentSection.hidden = false;
+  urgentTableWrap.innerHTML = '';
+
+  const table = document.createElement('table');
+  table.className = 'lot-table';
+
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>Product</th><th>Lot</th><th>Quantity</th><th>Expiry DTE</th><th>Status</th></tr>';
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  urgentItems.forEach((item) => {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable-row';
+    tr.addEventListener('click', () => showProductDetail(item.productName));
+
+    const daysLabel = item.daysUntilExpiry < 0
+      ? `Expired ${formatNumber(Math.abs(item.daysUntilExpiry))}d ago`
+      : `${formatNumber(item.daysUntilExpiry)} days`;
+    const statusBadge = `<span class="bucket-badge status-badge bucket-badge--${item.flag.toLowerCase()}">${STATUS_ICON_SVG[item.flag]}<span>${item.flag}</span></span>`;
+
+    const cells = [
+      item.productName,
+      item.lotNumber,
+      `${formatNumber(item.quantityOnHand)} units`,
+      daysLabel,
+      statusBadge,
+    ];
+
+    cells.forEach((html, i) => {
+      const td = document.createElement('td');
+      if (i === cells.length - 1) {
+        td.innerHTML = html;
+      } else {
+        td.textContent = html;
+      }
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+
+  urgentTableWrap.appendChild(table);
 }
 
 function updateFooter() {
@@ -596,6 +682,7 @@ function renderResults(grouped, totalScanned) {
   if (totalFlaggedCount === 0) {
     resultsCount.textContent = "You're on top of it.";
     summaryCardsEl.hidden = true;
+    urgentSection.hidden = true;
     resultsFeed.hidden = true;
     emptyState.hidden = false;
     resultsFooter.hidden = true;
@@ -609,6 +696,7 @@ function renderResults(grouped, totalScanned) {
   resultsFooter.hidden = false;
 
   renderSummaryCards(grouped);
+  renderUrgentTable(grouped);
 
   const sections = [
     { key: 'RESTOCK', label: 'Restock', items: grouped.RESTOCK },
@@ -658,7 +746,7 @@ function buildLotTable(product) {
   table.className = 'lot-table';
 
   const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>Lot</th><th>Bin</th><th>Quantity</th><th>Expires</th><th>Days to expiry</th></tr>';
+  thead.innerHTML = `<tr><th>Lot</th><th>Bin</th><th>Quantity</th>${product.hasAnyCost ? '<th>Unit cost</th><th>Value</th>' : ''}<th>Expires</th><th>Days to expiry</th></tr>`;
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
@@ -675,9 +763,13 @@ function buildLotTable(product) {
       lot.lotNumber,
       lot.storageBin,
       `${formatNumber(lot.quantityOnHand)} units`,
-      formatDateDisplay(lot.expirationDate),
-      `${daysLabel} ${badge}`,
     ];
+    if (product.hasAnyCost) {
+      cells.push(lot.unitCost !== null ? formatCurrency(lot.unitCost) : '—');
+      cells.push(lot.value !== null ? formatCurrency(lot.value) : '—');
+    }
+    cells.push(formatDateDisplay(lot.expirationDate));
+    cells.push(`${daysLabel} ${badge}`);
 
     cells.forEach((html, i) => {
       const td = document.createElement('td');
@@ -701,7 +793,11 @@ function showProductDetail(productName) {
   if (!product) return;
 
   productViewName.textContent = productName;
-  productViewMeta.textContent = `${product.category} • ${formatNumber(product.totalQuantity)} units across ${product.lots.length} lot${product.lots.length === 1 ? '' : 's'}`;
+  let meta = `${product.category} • ${formatNumber(product.totalQuantity)} units across ${product.lots.length} lot${product.lots.length === 1 ? '' : 's'}`;
+  if (product.hasAnyCost) {
+    meta += ` • ${formatCurrency(product.totalValue)} value${product.hasFullCost ? '' : ' (partial)'}`;
+  }
+  productViewMeta.textContent = meta;
 
   buildFefoBar(product);
   buildLotTable(product);
@@ -711,6 +807,10 @@ function showProductDetail(productName) {
 
 backToResultsBtn.addEventListener('click', () => {
   switchView(productView, resultsView);
+});
+
+printPickListBtn.addEventListener('click', () => {
+  window.print();
 });
 
 /* View + loading state */

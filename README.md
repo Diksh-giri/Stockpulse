@@ -17,7 +17,7 @@ Drag a CSV onto the drop zone (or click it to browse), or click "Download sample
 Clicking "Check inventory" reads the file entirely in your browser (via the FileReader API — the file never leaves your machine) and runs the calculations described below on every row.
 
 **3. Results (the morning dashboard)**
-At the top, three summary cards show how many products are flagged Restock, Clear, and Hold — click a card to jump straight to that tab. Below, the same three tabs group every flagged product, each showing a count. If nothing needs attention, you'll see "You're on top of it." instead.
+At the top, three summary cards show how many products are flagged Restock, Clear, and Hold — click a card to jump straight to that tab. Below that, an **Urgent lots requiring action** table lists every Restock- and Clear-flagged lot together, soonest-to-expire first, with a colored Restock/Clear status badge — click any row to open that product's FEFO Matrix. Further down, the same three tabs group every flagged product, each showing a count. If nothing needs attention, you'll see "You're on top of it." instead.
 
 Each flagged product shows:
 - The product name (click it to open the FEFO Matrix for that product — see below) and category
@@ -30,13 +30,17 @@ Each flagged product shows:
 Click "New upload" at any time to go back and check another file.
 
 **4. The FEFO Matrix (per-product lot view)**
-Clicking any product name opens its FEFO (First-Expired-First-Out) Matrix: a shelf-life bar showing what share of that product's total stock is Red (expiring in 2 days or less, or already expired), Yellow (3–7 days), or Green (more than 7 days) — followed by a table of every lot for that product, sorted soonest-to-expire first, with lot number, storage bin, quantity, expiration date, and days-to-expiry. This surfaces risk that a product-level total can hide: a product can look fine on aggregate (plenty of total stock) while one specific lot is quietly about to expire unsold. Click "Back" to return to the dashboard.
+Clicking any product name (in the urgent table or in a result card) opens its FEFO (First-Expired-First-Out) Matrix: a shelf-life bar showing what share of that product's total stock is Red (expiring in 2 days or less, or already expired), Yellow (3–7 days), or Green (more than 7 days) — followed by a table of every lot for that product, sorted soonest-to-expire first, with lot number, storage bin, quantity, expiration date, and days-to-expiry. If the CSV includes `unit_cost`, the header also shows the product's total inventory value and the lot table gains Unit Cost and Value columns. This surfaces risk that a product-level total can hide: a product can look fine on aggregate (plenty of total stock) while one specific lot is quietly about to expire unsold.
+
+Click **"Print pick list"** to print the page or save it as a PDF (via your browser's print dialog) — useful for handing a physical pick list to a warehouse operator. Click "Back" to return to the dashboard.
 
 ## What Restock, Clear, and Hold mean
 
-- **Restock** — this product is about to run out. Order more now.
-- **Clear** — this product will expire before it sells through at the current pace. Move it or discount it now.
-- **Hold** — this product has more than enough stock for its normal reorder cycle. Skip ordering it this time.
+- **Restock** (red, ▲) — this product is about to run out. Order more now.
+- **Clear** (amber, ⏱) — this product will expire before it sells through at the current pace. Move it or discount it now.
+- **Hold** (green, ✓) — this product has more than enough stock for its normal reorder cycle. Skip ordering it this time.
+
+Each status has both a color and an icon — a plain red/amber/green traffic-light convention chosen because it's the standard severity language for inventory and ops dashboards, with an icon on every badge so the status still reads correctly for colorblind users or in grayscale (color is never the only signal). Cards get a soft tint of their status color as a background, not just a colored border, so the three categories stay easy to tell apart at a glance without looking like an alarm panel.
 
 A product only ever gets one flag, checked in that priority order (Restock beats Clear beats Hold). If none of the rules apply, the product simply doesn't appear — it's fine as-is.
 
@@ -70,20 +74,20 @@ The file must have a header row including at least these required column names (
 product_name, category, quantity_on_hand, reorder_threshold, reorder_quantity, expiration_date, sales_rate
 ```
 
-Two extra columns are optional and power the FEFO Matrix:
+Three extra columns are optional:
 
 ```
-lot_number, storage_bin
+lot_number, storage_bin, unit_cost
 ```
 
-If you omit them, StockPulse auto-generates a lot number (`LOT-1`, `LOT-2`, ...) and a placeholder bin (`—`) per row, so existing files without these columns still work unchanged.
+If you omit `lot_number`/`storage_bin`, StockPulse auto-generates a lot number (`LOT-1`, `LOT-2`, ...) and a placeholder bin (`—`) per row, so existing files without these columns still work unchanged. `unit_cost` (a plain decimal, e.g. `2.10`) unlocks a total inventory value on the FEFO Matrix page — omit it and value just isn't shown, nothing else changes.
 
 - `expiration_date` must be in `YYYY-MM-DD` format.
 - Rows that are missing required values, have non-numeric quantities, or have an unparseable date are silently skipped — they don't stop the rest of the file from being processed.
 - If the file is empty, has the wrong extension, is missing required columns, or has no valid rows at all, an inline error message explains what to fix.
 - A product can appear on more than one row if it has multiple active lots (different batches with different expiration dates/quantities). Each lot row is still flagged independently for Restock/Clear/Hold, and all of a product's lots roll up together into its FEFO Matrix.
 
-`sample_inventory.csv` in this folder (or the "Download sample CSV" link on the upload page) contains a ready-to-use example with a mix of all three flags, including one product (Skim Milk 1L) split across two lots to demonstrate the FEFO Matrix.
+`sample_inventory.csv` in this folder (or the "Download sample CSV" link on the upload page) contains a ready-to-use example with a mix of all three flags, a `unit_cost` on every row, and one product (Skim Milk 1L) split across two lots to demonstrate the FEFO Matrix.
 
 ## Project files
 
