@@ -1,903 +1,854 @@
-const REQUIRED_COLUMNS = [
-  'product_name',
-  'category',
-  'quantity_on_hand',
-  'reorder_threshold',
-  'reorder_quantity',
-  'expiration_date',
-  'sales_rate',
-];
+// ============================================================
+// StockPulse — Dairy Inventory Dashboard
+// ============================================================
 
-const RESTOCK_DAYS_THRESHOLD = 5;
-const CLEAR_DAYS_THRESHOLD = 7;
-const FEFO_RED_MAX_DAYS = 2;
-const FEFO_YELLOW_MAX_DAYS = 7;
-const MS_PER_DAY = 1000 * 60 * 60 * 24;
-const MIN_LOADING_MS = 1000;
-const VIEW_TRANSITION_MS = 300;
-
-const STATUS_ICON_SVG = {
-  RESTOCK: '<svg class="status-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1.5L15 14H1L8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><line x1="8" y1="6" x2="8" y2="9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.5" r="0.8" fill="currentColor"/></svg>',
-  CLEAR: '<svg class="status-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.5V8L10.5 9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  HOLD: '<svg class="status-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8.5L6.5 12L13 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+const CONFIG = {
+  USE_AI_BRIEFING: false,    // true = Anthropic API  |  false = rule-based (free, instant)
+  AI_DAILY_LIMIT: 3,         // per-browser daily cap (localStorage). Only used when USE_AI_BRIEFING: true
+  ANTHROPIC_API_KEY: '',     // paste key here to bake it in, or leave blank for user-input field
 };
 
-const SECTION_DESCRIPTIONS = {
-  RESTOCK: "Running low on stock — order more before it runs out.",
-  CLEAR: "Won't sell through before it expires — move or discount it now.",
-  HOLD: "Well stocked for the cycle ahead — skip reordering for now.",
+// Single namespace for all app state to avoid polluting globals.
+window.APP = {
+  today: [],
+  hist: [],
+  computed: [],          // TODAY_DATA rows enriched with flag/priority/etc.
+  reviewed: new Set(),   // batch_ids marked as reviewed
+  activeSummaryFilter: null,   // 'RESTOCK' | 'CLEAR' | 'HOLD' | null
+  activeTimelineFilter: null,  // 'expired' | 'urgent' | 'soon' | 'safe' | null
+  activeFeedTab: 'ALL',
+  charts: {},             // Chart.js instances, keyed by canvas id
+  aggregates: {},          // pre-aggregated historical datasets
 };
 
-const SAMPLE_CSV = `product_name,category,quantity_on_hand,reorder_threshold,reorder_quantity,expiration_date,sales_rate,lot_number,storage_bin,unit_cost
-Whole Milk 1L,Milk,40,50,100,2026-07-25,8,LOT-2026-A01,BIN-A1,2.10
-Greek Yogurt 500g,Yogurt,15,20,60,2026-07-28,3,LOT-2026-A02,BIN-A2,3.25
-Heavy Cream 500ml,Cream,45,20,50,2026-07-26,1,LOT-2026-A03,BIN-A3,2.80
-Skim Milk 1L,Milk,80,50,100,2026-08-17,5,LOT-2026-B01,BIN-B1,1.95
-Skim Milk 1L,Milk,40,50,100,2026-07-28,5,LOT-2026-B02,BIN-B2,1.95
-Salted Butter 250g,Butter,55,10,30,2026-09-05,3,LOT-2026-A04,BIN-A4,3.10
-Cheddar Cheese 500g,Cheese,10,15,40,2026-08-20,2,LOT-2026-A05,BIN-A5,4.50
-Mozzarella 250g,Cheese,90,20,50,2026-08-18,3,LOT-2026-A06,BIN-A6,3.75
-Whipping Cream 250ml,Cream,80,25,60,2026-08-05,6,LOT-2026-A07,BIN-A7,2.60
-Unsalted Butter 250g,Butter,8,10,30,2026-09-01,2,LOT-2026-A08,BIN-A8,3.10
-Strawberry Yogurt 200g,Yogurt,200,30,80,2026-08-15,4,LOT-2026-A09,BIN-A9,1.40
-`;
+// ------------------------------------------------------------
+// CSV PARSING
+// ------------------------------------------------------------
 
-class AppError extends Error {}
-
-const uploadView = document.getElementById('upload-view');
-const resultsView = document.getElementById('results-view');
-
-const dropzone = document.getElementById('dropzone');
-const dropzoneIdle = document.getElementById('dropzone-idle');
-const dropzoneLoading = document.getElementById('dropzone-loading');
-const fileInput = document.getElementById('file-input');
-const filenameEl = document.getElementById('filename');
-const errorMessageEl = document.getElementById('error-message');
-const submitBtn = document.getElementById('submit-btn');
-const uploadForm = document.getElementById('upload-form');
-const downloadSampleBtn = document.getElementById('download-sample-btn');
-
-const newUploadBtn = document.getElementById('new-upload-btn');
-const resultsCount = document.getElementById('results-count');
-const resultsMeta = document.getElementById('results-meta');
-const resultsFeed = document.getElementById('results-feed');
-const summaryCardsEl = document.getElementById('summary-cards');
-const urgentSection = document.getElementById('urgent-section');
-const urgentTableWrap = document.getElementById('urgent-table-wrap');
-const emptyState = document.getElementById('empty-state');
-const resultsFooter = document.getElementById('results-footer');
-
-const productView = document.getElementById('product-view');
-const productViewName = document.getElementById('product-view-name');
-const productViewMeta = document.getElementById('product-view-meta');
-const fefoBar = document.getElementById('fefo-bar');
-const fefoBarLegend = document.getElementById('fefo-bar-legend');
-const lotTableWrap = document.getElementById('lot-table-wrap');
-const backToResultsBtn = document.getElementById('back-to-results-btn');
-const printPickListBtn = document.getElementById('print-pick-list-btn');
-
-let reviewedCount = 0;
-let totalFlaggedCount = 0;
-let currentCatalog = {};
-
-/* File selection */
-
-function setSelectedFile(file) {
-  clearError();
-  filenameEl.textContent = file.name;
-  submitBtn.disabled = false;
-}
-
-fileInput.addEventListener('change', () => {
-  const file = fileInput.files[0];
-  if (file) setSelectedFile(file);
-});
-
-['dragenter', 'dragover'].forEach((eventName) => {
-  dropzone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    dropzone.classList.add('dragover');
-  });
-});
-
-['dragleave', 'drop'].forEach((eventName) => {
-  dropzone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    dropzone.classList.remove('dragover');
-  });
-});
-
-dropzone.addEventListener('drop', (event) => {
-  const file = event.dataTransfer.files[0];
-  if (!file) return;
-  fileInput.files = event.dataTransfer.files;
-  setSelectedFile(file);
-});
-
-/* Errors */
-
-function showError(message) {
-  errorMessageEl.textContent = message;
-  errorMessageEl.hidden = false;
-}
-
-function clearError() {
-  errorMessageEl.textContent = '';
-  errorMessageEl.hidden = true;
-}
-
-/* CSV parsing */
-
-function isCSVFile(file) {
-  return file.name.toLowerCase().endsWith('.csv');
-}
-
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new AppError("Couldn't read this file."));
-    reader.readAsText(file);
-  });
-}
-
-function isValidRow(row) {
-  if (!row.product_name || !row.category) return false;
-  const numericFields = [row.quantity_on_hand, row.reorder_threshold, row.reorder_quantity, row.sales_rate];
-  if (numericFields.some((value) => value === undefined || value === '' || Number.isNaN(parseFloat(value)))) {
-    return false;
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(row.expiration_date || '')) return false;
-  if (Number.isNaN(parseDateUTC(row.expiration_date))) return false;
-  return true;
-}
-
-function parseCSVText(text) {
-  const lines = text.split(/\r\n|\n/).filter((line) => line.trim() !== '');
-
-  if (lines.length === 0) {
-    throw new AppError('This file is empty.');
-  }
-
-  const headers = lines[0].split(',').map((header) => header.trim());
-  const missingColumns = REQUIRED_COLUMNS.filter((column) => !headers.includes(column));
-  if (missingColumns.length > 0) {
-    throw new AppError(`Missing required columns: ${missingColumns.join(', ')}`);
-  }
-
-  const indexByColumn = {};
-  headers.forEach((header, i) => {
-    indexByColumn[header] = i;
-  });
-
+// Parses raw CSV text into an array of objects keyed by header name.
+function parseCSV(text) {
+  const lines = text.split('\n').filter(l => l.trim().length > 0);
+  const headers = lines[0].split(',').map(h => h.trim());
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map((value) => value.trim());
-    if (values.length < headers.length) continue;
-
+    const cells = lines[i].split(',');
     const row = {};
-    REQUIRED_COLUMNS.forEach((column) => {
-      row[column] = values[indexByColumn[column]];
+    headers.forEach((h, idx) => {
+      row[h] = (cells[idx] !== undefined ? cells[idx] : '').trim();
     });
-    row.lot_number = indexByColumn.lot_number !== undefined ? values[indexByColumn.lot_number] : `LOT-${i}`;
-    row.storage_bin = indexByColumn.storage_bin !== undefined ? values[indexByColumn.storage_bin] : '—';
-    row.unit_cost = indexByColumn.unit_cost !== undefined ? values[indexByColumn.unit_cost] : undefined;
+    rows.push(row);
+  }
+  return rows;
+}
 
-    if (isValidRow(row)) rows.push(row);
+// Casts today_data.csv's numeric columns from strings to integers.
+function castTodayData(rows) {
+  const intCols = ['quantity_received', 'quantity_sold', 'quantity_in_stock', 'expected_stock',
+    'stock_discrepancy', 'minimum_stock_threshold', 'reorder_quantity', 'days_until_expiration'];
+  rows.forEach(r => {
+    intCols.forEach(c => { r[c] = parseInt(r[c], 10); });
+  });
+  return rows;
+}
+
+// Casts historical_data.csv's numeric columns from strings to floats/ints.
+function castHistData(rows) {
+  const floatCols = ['quantity_received', 'expected_stock', 'stock_discrepancy',
+    'minimum_stock_threshold', 'reorder_quantity'];
+  const intCols = ['quantity_sold', 'quantity_in_stock', 'days_until_expiration'];
+  rows.forEach(r => {
+    floatCols.forEach(c => { r[c] = parseFloat(r[c]); });
+    intCols.forEach(c => { r[c] = parseInt(r[c], 10); });
+  });
+  return rows;
+}
+
+// ------------------------------------------------------------
+// DATA LOADING
+// ------------------------------------------------------------
+
+// Fetches both CSVs in parallel, parses them, and boots the app.
+function loadData() {
+  Promise.all([
+    fetch('./today_data.csv').then(r => r.text()),
+    fetch('./historical_data.csv').then(r => r.text()),
+  ]).then(([todayText, histText]) => {
+    window.TODAY_DATA = castTodayData(parseCSV(todayText));
+    window.HIST_DATA = castHistData(parseCSV(histText));
+    APP.today = window.TODAY_DATA;
+    APP.hist = window.HIST_DATA;
+    hideLoadingSpinner();
+    initApp();
+  }).catch(err => {
+    hideLoadingSpinner();
+    console.error('Failed to load inventory data', err);
+  });
+}
+
+// Hides the centered loading spinner overlay.
+function hideLoadingSpinner() {
+  const el = document.getElementById('loading-spinner');
+  if (el) el.style.display = 'none';
+}
+
+// ------------------------------------------------------------
+// CALCULATIONS
+// ------------------------------------------------------------
+
+// Enriches each TODAY_DATA row with sales rate, days remaining, flag, and priority.
+function computeToday() {
+  APP.computed = APP.today.map(r => {
+    const sales_rate = r.quantity_sold / 30;
+    const days_remaining = sales_rate === 0 ? 999 : r.quantity_in_stock / sales_rate;
+    const days_until_expiry = r.days_until_expiration;
+    const units_expiring_unsold = r.quantity_in_stock - (sales_rate * Math.max(days_until_expiry, 0));
+    const normal_cycle = sales_rate === 0 ? 999 : r.minimum_stock_threshold / sales_rate;
+
+    let flag = null;
+    if (days_remaining <= 5) {
+      flag = 'RESTOCK';
+    } else if (units_expiring_unsold > 0 && days_until_expiry <= 7) {
+      flag = 'CLEAR';
+    } else if (days_remaining > (2 * normal_cycle)) {
+      flag = 'HOLD';
+    }
+
+    let priority;
+    if (r.days_until_expiration < 0) {
+      priority = r.quantity_in_stock * r.reorder_quantity * 1000;
+    } else {
+      priority = (r.quantity_in_stock * r.reorder_quantity) / Math.max(r.days_until_expiration, 1);
+    }
+
+    return Object.assign({}, r, {
+      sales_rate, days_remaining, days_until_expiry, units_expiring_unsold,
+      normal_cycle, flag, priority,
+    });
+  });
+}
+
+// ------------------------------------------------------------
+// INIT
+// ------------------------------------------------------------
+
+// Runs all one-time setup after data has loaded: calculations, aggregation, landing render.
+function initApp() {
+  computeToday();
+  aggregateHistorical();
+  renderLandingStats();
+  bindGlobalEvents();
+}
+
+// Wires up navigation and static event listeners that only need binding once.
+function bindGlobalEvents() {
+  document.getElementById('hero-cta').addEventListener('click', () => { showView('dashboard-view'); triggerDashboard(); });
+  document.getElementById('bottom-cta').addEventListener('click', () => { showView('dashboard-view'); triggerDashboard(); });
+  document.getElementById('back-to-landing').addEventListener('click', () => showView('landing-view'));
+  document.getElementById('back-to-landing-2').addEventListener('click', () => showView('landing-view'));
+  document.getElementById('tab-dashboard').addEventListener('click', () => showView('dashboard-view'));
+  document.getElementById('tab-insights').addEventListener('click', () => { showView('insights-view'); renderInsights(); });
+  document.getElementById('tab-dashboard-2').addEventListener('click', () => showView('dashboard-view'));
+  document.getElementById('tab-insights-2').addEventListener('click', () => { showView('insights-view'); renderInsights(); });
+  document.getElementById('back-to-dashboard').addEventListener('click', () => showView('dashboard-view'));
+  document.getElementById('print-picklist').addEventListener('click', () => window.print());
+
+  document.querySelectorAll('.summary-card').forEach(card => {
+    card.addEventListener('click', () => toggleSummaryFilter(card.dataset.flag));
+  });
+
+  document.querySelectorAll('.feed-tab').forEach(tab => {
+    tab.addEventListener('click', () => setFeedTab(tab.dataset.filter));
+  });
+}
+
+// Shows the requested view and hides all others, with a fade transition.
+function showView(viewId) {
+  document.querySelectorAll('.view').forEach(v => {
+    v.style.display = (v.id === viewId) ? '' : 'none';
+  });
+  const target = document.getElementById(viewId);
+  target.classList.remove('view-fade-in');
+  void target.offsetWidth;
+  target.classList.add('view-fade-in');
+}
+
+// First-time setup when the dashboard is opened: render everything.
+function triggerDashboard() {
+  renderSummaryCards();
+  renderTimeline();
+  renderUrgentLots();
+  renderFeed();
+  renderReviewFooter();
+  renderBriefing();
+}
+
+// ------------------------------------------------------------
+// LANDING VIEW
+// ------------------------------------------------------------
+
+// Calculates and renders the 3 live stat cards on the landing page.
+function renderLandingStats() {
+  const expiring = APP.today.filter(r => r.days_until_expiration >= 0 && r.days_until_expiration <= 7).length;
+  const belowThreshold = APP.today.filter(r => r.quantity_in_stock <= r.minimum_stock_threshold).length;
+  const needsAction = APP.computed.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR').length;
+
+  document.getElementById('stat-expiring').textContent = expiring;
+  document.getElementById('stat-below-threshold').textContent = belowThreshold;
+  document.getElementById('stat-needs-action').textContent = needsAction;
+}
+
+// ------------------------------------------------------------
+// DASHBOARD — SUMMARY CARDS
+// ------------------------------------------------------------
+
+// Renders the 3 summary cards (Restock/Clear/Hold) with counts and subtext.
+function renderSummaryCards() {
+  const restock = APP.computed.filter(r => r.flag === 'RESTOCK');
+  const clear = APP.computed.filter(r => r.flag === 'CLEAR');
+  const hold = APP.computed.filter(r => r.flag === 'HOLD');
+  const unflagged = APP.computed.filter(r => !r.flag);
+
+  document.getElementById('count-restock').textContent = restock.length;
+  document.getElementById('count-clear').textContent = clear.length;
+  document.getElementById('count-hold').textContent = hold.length;
+
+  const restockQty = restock.reduce((sum, r) => sum + r.reorder_quantity, 0);
+  document.getElementById('subtext-restock').textContent = `Total reorder qty: ${restockQty}`;
+
+  const avgDays = clear.length ? (clear.reduce((sum, r) => sum + r.days_until_expiry, 0) / clear.length) : 0;
+  document.getElementById('subtext-clear').textContent = `Avg ${avgDays.toFixed(1)} days remaining`;
+
+  document.getElementById('subtext-hold').textContent = `${unflagged.length} items need no action`;
+
+  document.querySelectorAll('.summary-card').forEach(card => {
+    card.classList.toggle('active', card.dataset.flag === APP.activeSummaryFilter);
+  });
+}
+
+// Toggles the active summary card filter and re-renders the feed.
+function toggleSummaryFilter(flag) {
+  APP.activeSummaryFilter = (APP.activeSummaryFilter === flag) ? null : flag;
+  APP.activeTimelineFilter = null;
+  APP.activeFeedTab = 'ALL';
+  document.querySelectorAll('.feed-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === 'ALL'));
+  renderSummaryCards();
+  renderTimeline();
+  renderFeed();
+}
+
+// ------------------------------------------------------------
+// DASHBOARD — EXPIRY TIMELINE
+// ------------------------------------------------------------
+
+// Renders the 4-segment expiry timeline bar sized proportionally to counts.
+function renderTimeline() {
+  const expired = APP.today.filter(r => r.days_until_expiration < 0);
+  const urgent = APP.today.filter(r => r.days_until_expiration >= 0 && r.days_until_expiration <= 3);
+  const soon = APP.today.filter(r => r.days_until_expiration >= 4 && r.days_until_expiration <= 7);
+  const safe = APP.today.filter(r => r.days_until_expiration >= 8);
+  const total = APP.today.length || 1;
+
+  const segments = [
+    { key: 'expired', label: 'Expired', count: expired.length, color: '#D85A30' },
+    { key: 'urgent', label: 'Urgent 0–3d', count: urgent.length, color: '#E8593C' },
+    { key: 'soon', label: 'Expiring Soon 4–7d', count: soon.length, color: '#BA7517' },
+    { key: 'safe', label: 'Safe 8+d', count: safe.length, color: '#1D9E75' },
+  ];
+
+  const bar = document.getElementById('timeline-bar');
+  bar.innerHTML = segments.map(seg => {
+    const pct = (seg.count / total) * 100;
+    const active = APP.activeTimelineFilter === seg.key ? 'active' : '';
+    const wide = pct >= 12;
+    return `<div class="timeline-segment ${active}" data-key="${seg.key}" style="width:${pct}%;background:${seg.color};">
+      ${wide ? `<span class="segment-label-inline">${seg.count} · ${seg.label}</span>` : ''}
+    </div>`;
+  }).join('') + segments.filter(s => (s.count / total) * 100 < 12 && s.count > 0).map(s =>
+    `<span class="segment-label-below" style="color:${s.color}">${s.count} ${s.label}</span>`
+  ).join('');
+
+  bar.querySelectorAll('.timeline-segment').forEach(seg => {
+    seg.addEventListener('click', () => toggleTimelineFilter(seg.dataset.key));
+  });
+}
+
+// Toggles the active timeline segment filter and re-renders the feed.
+function toggleTimelineFilter(key) {
+  APP.activeTimelineFilter = (APP.activeTimelineFilter === key) ? null : key;
+  APP.activeSummaryFilter = null;
+  APP.activeFeedTab = 'ALL';
+  document.querySelectorAll('.feed-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === 'ALL'));
+  renderTimeline();
+  renderSummaryCards();
+  renderFeed();
+}
+
+// ------------------------------------------------------------
+// DASHBOARD — URGENT LOTS TABLE
+// ------------------------------------------------------------
+
+// Renders the urgent lots table (Restock + Clear items ranked by priority).
+function renderUrgentLots() {
+  const urgent = APP.computed.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR')
+    .sort((a, b) => b.priority - a.priority);
+
+  const section = document.getElementById('urgent-lots-section');
+  if (urgent.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+
+  const body = document.getElementById('urgent-table-body');
+  body.innerHTML = urgent.map((r, i) => {
+    const badgeClass = r.flag === 'RESTOCK' ? 'badge-red' : 'badge-amber';
+    const action = r.flag === 'RESTOCK'
+      ? `Order ${r.reorder_quantity} ${r.unit}`
+      : `Move ${r.quantity_in_stock} ${r.unit}`;
+    return `<tr class="urgent-row" data-product="${escapeHtml(r.product_name)}">
+      <td>${i + 1}</td>
+      <td class="product-link">${escapeHtml(r.product_name)}</td>
+      <td>${escapeHtml(r.brand)}</td>
+      <td>${escapeHtml(r.sales_channel)}</td>
+      <td>${r.quantity_in_stock} ${escapeHtml(r.unit)}</td>
+      <td>${r.days_until_expiration}d</td>
+      <td><span class="badge ${badgeClass}">${r.flag}</span></td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('.urgent-row').forEach(row => {
+    row.addEventListener('click', () => openFefo(row.dataset.product));
+  });
+}
+
+// ------------------------------------------------------------
+// DASHBOARD — PRODUCT FEED
+// ------------------------------------------------------------
+
+// Sets the active feed tab filter and re-renders the feed.
+function setFeedTab(filter) {
+  APP.activeFeedTab = filter;
+  APP.activeSummaryFilter = null;
+  APP.activeTimelineFilter = null;
+  document.querySelectorAll('.feed-tab').forEach(t => t.classList.toggle('active', t.dataset.filter === filter));
+  renderSummaryCards();
+  renderTimeline();
+  renderFeed();
+}
+
+// Applies all active filters (summary card, timeline segment, feed tab) to the computed rows.
+function getFilteredRows() {
+  let rows = APP.computed;
+
+  if (APP.activeSummaryFilter) {
+    rows = rows.filter(r => r.flag === APP.activeSummaryFilter);
+  } else if (APP.activeFeedTab !== 'ALL') {
+    rows = rows.filter(r => r.flag === APP.activeFeedTab);
   }
 
-  if (rows.length === 0) {
-    throw new AppError("Couldn't read any valid rows from this file.");
+  if (APP.activeTimelineFilter) {
+    rows = rows.filter(r => {
+      const d = r.days_until_expiration;
+      if (APP.activeTimelineFilter === 'expired') return d < 0;
+      if (APP.activeTimelineFilter === 'urgent') return d >= 0 && d <= 3;
+      if (APP.activeTimelineFilter === 'soon') return d >= 4 && d <= 7;
+      if (APP.activeTimelineFilter === 'safe') return d >= 8;
+      return true;
+    });
   }
 
   return rows;
 }
 
-/* Calculations */
-
-function parseDateUTC(dateStr) {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  return Date.UTC(year, month - 1, day);
+// Builds the reason text + key number for a single product card based on its flag.
+function buildReason(r) {
+  if (r.flag === 'RESTOCK') {
+    return {
+      text: `Runs out in ${Math.max(Math.round(r.days_remaining), 0)} days. Order ${r.reorder_quantity} ${r.unit}.`,
+      keyNumber: r.reorder_quantity,
+      colorClass: 'text-red',
+    };
+  }
+  if (r.flag === 'CLEAR') {
+    return {
+      text: `${Math.max(Math.round(r.units_expiring_unsold), 0)} ${r.unit} expire in ${r.days_until_expiry} days before they sell.`,
+      keyNumber: r.days_until_expiry,
+      colorClass: 'text-amber',
+    };
+  }
+  if (r.flag === 'HOLD') {
+    return {
+      text: `${Math.round(r.days_remaining)} days of stock. Skip reorder this cycle.`,
+      keyNumber: Math.round(r.days_remaining),
+      colorClass: 'text-green',
+    };
+  }
+  return { text: 'No action needed right now.', keyNumber: '—', colorClass: 'text-muted' };
 }
 
-function todayUTC() {
-  const now = new Date();
-  return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+// Renders the filtered product feed as expandable cards with review checkboxes.
+function renderFeed() {
+  const rows = getFilteredRows();
+  const list = document.getElementById('feed-list');
+
+  list.innerHTML = rows.map(r => {
+    const reason = buildReason(r);
+    const badgeClass = r.flag === 'RESTOCK' ? 'badge-red' : r.flag === 'CLEAR' ? 'badge-amber' : r.flag === 'HOLD' ? 'badge-green' : 'badge-muted';
+    const reviewed = APP.reviewed.has(r.batch_id);
+    return `<div class="product-card ${reviewed ? 'reviewed' : ''}" data-batch="${r.batch_id}">
+      <div class="card-top-row">
+        <span class="card-product-name" data-product="${escapeHtml(r.product_name)}">${escapeHtml(r.product_name)} <span class="card-brand">— ${escapeHtml(r.brand)}</span></span>
+        <span class="badge ${badgeClass}">${r.flag || 'NONE'}</span>
+      </div>
+      <div class="card-second-row">
+        <span class="tag">${escapeHtml(r.unit)}</span>
+        <span class="tag">${escapeHtml(r.packaging_type)}</span>
+        <span class="tag">${escapeHtml(r.sales_channel)}</span>
+      </div>
+      <div class="card-main">
+        <p class="card-reason">${reason.text}</p>
+        <span class="card-key-number ${reason.colorClass}">${reason.keyNumber}</span>
+      </div>
+      <button class="details-toggle" data-batch="${r.batch_id}">View details</button>
+      <div class="card-details" id="details-${r.batch_id}" style="display:none;">
+        <div class="details-grid">
+          <span class="detail-label">In stock</span><span>${r.quantity_in_stock}</span>
+          <span class="detail-label">Min threshold</span><span>${r.minimum_stock_threshold}</span>
+          <span class="detail-label">Days until expiration</span><span>${r.days_until_expiration}</span>
+          <span class="detail-label">Expected stock</span><span>${r.expected_stock}</span>
+          <span class="detail-label">Stock discrepancy</span><span>${r.stock_discrepancy}</span>
+          <span class="detail-label">Reorder qty</span><span>${r.reorder_quantity}</span>
+        </div>
+      </div>
+      <label class="review-checkbox">
+        <input type="checkbox" data-batch="${r.batch_id}" ${reviewed ? 'checked' : ''}>
+        Mark as reviewed
+      </label>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.card-product-name').forEach(el => {
+    el.addEventListener('click', () => openFefo(el.dataset.product));
+  });
+  list.querySelectorAll('.details-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const panel = document.getElementById(`details-${btn.dataset.batch}`);
+      panel.style.display = panel.style.display === 'none' ? '' : 'none';
+    });
+  });
+  list.querySelectorAll('.review-checkbox input').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) APP.reviewed.add(cb.dataset.batch);
+      else APP.reviewed.delete(cb.dataset.batch);
+      document.querySelector(`.product-card[data-batch="${cb.dataset.batch}"]`).classList.toggle('reviewed', cb.checked);
+      renderReviewFooter();
+    });
+  });
 }
 
-function formatNumber(value) {
-  if (!Number.isFinite(value)) return '0';
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+// Renders the sticky "X of Y reviewed" footer, updating live as checkboxes change.
+function renderReviewFooter() {
+  const total = APP.computed.length;
+  const reviewedCount = APP.reviewed.size;
+  const footer = document.getElementById('review-footer');
+  const text = document.getElementById('review-footer-text');
+  if (total === 0) {
+    footer.style.display = 'none';
+    return;
+  }
+  footer.style.display = '';
+  text.textContent = reviewedCount === total
+    ? 'All items reviewed — see you tomorrow 🌅'
+    : `${reviewedCount} of ${total} items reviewed`;
 }
 
-function formatCurrency(value) {
-  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+// Escapes HTML-sensitive characters to prevent injection when interpolating CSV values.
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
-function formatDateDisplay(dateStr) {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+// ------------------------------------------------------------
+// AI BRIEFING
+// ------------------------------------------------------------
+
+// Entry point for the briefing panel: routes to AI or rule-based path per CONFIG.
+function renderBriefing() {
+  if (CONFIG.USE_AI_BRIEFING) {
+    renderAiBriefing();
+  } else {
+    renderRuleBasedBriefing();
+  }
 }
 
-function evaluateProduct(row) {
-  const quantityOnHand = parseFloat(row.quantity_on_hand);
-  const reorderThreshold = parseFloat(row.reorder_threshold);
-  const reorderQuantity = parseFloat(row.reorder_quantity);
-  const salesRate = parseFloat(row.sales_rate);
+// Builds and types out the rule-based morning briefing sentence.
+function renderRuleBasedBriefing() {
+  const text = buildRuleBasedBriefingText();
+  typewrite(document.getElementById('briefing-body'), text);
+}
 
-  const daysRemaining = quantityOnHand / salesRate;
-  const daysUntilExpiry = (parseDateUTC(row.expiration_date) - todayUTC()) / MS_PER_DAY;
-  const unitsExpiringUnsold = quantityOnHand - salesRate * daysUntilExpiry;
-  const normalCycle = reorderThreshold / salesRate;
+// Constructs the rule-based briefing sentence from real TODAY_DATA values.
+function buildRuleBasedBriefingText() {
+  const expired = APP.today.filter(r => r.days_until_expiration < 0).length;
+  const urgent = APP.today.filter(r => r.days_until_expiration >= 0 && r.days_until_expiration <= 3).length;
+  const zeroStock = APP.today.filter(r => r.quantity_in_stock === 0);
 
-  const base = {
-    productName: row.product_name,
-    category: row.category,
-    lotNumber: row.lot_number,
-    storageBin: row.storage_bin,
-    quantityOnHand,
-    expirationDate: row.expiration_date,
-    daysUntilExpiry,
+  const clearItems = APP.computed.filter(f => f.flag === 'CLEAR')
+    .sort((a, b) => a.days_until_expiration - b.days_until_expiration || b.quantity_in_stock - a.quantity_in_stock);
+  const topClear = clearItems[0];
+
+  const restockItems = APP.computed.filter(f => f.flag === 'RESTOCK')
+    .sort((a, b) => (a.quantity_in_stock / a.minimum_stock_threshold) - (b.quantity_in_stock / b.minimum_stock_threshold));
+  const topRestock = restockItems[0];
+
+  let text = `Good morning. Today's inventory has ${expired + urgent} items needing immediate attention — ` +
+    `${expired} expired batch${expired === 1 ? '' : 'es'} to remove and ${urgent} expiring within 3 days. `;
+
+  if (topClear) {
+    text += `Your top priority is ${topClear.product_name} (${topClear.brand}, ${topClear.quantity_in_stock} ${topClear.unit}) ` +
+      `expiring in ${topClear.days_until_expiration} day(s) — move or discount this stock now. `;
+  }
+
+  if (zeroStock.length > 0) {
+    text += `${zeroStock[0].product_name} (${zeroStock[0].brand}) is completely out of stock against a threshold of ${zeroStock[0].minimum_stock_threshold}. `;
+  } else if (topRestock) {
+    text += `${topRestock.product_name} (${topRestock.brand}) is at ${topRestock.quantity_in_stock} ${topRestock.unit} against a threshold of ` +
+      `${topRestock.minimum_stock_threshold} — reorder ${topRestock.reorder_quantity}. `;
+  }
+
+  text += 'Focus on the Clear items first before placing any restock orders.';
+  return text;
+}
+
+// Types text into a target element one character at a time.
+function typewrite(el, text) {
+  el.textContent = '';
+  let i = 0;
+  const interval = setInterval(() => {
+    el.textContent += text[i];
+    i++;
+    if (i >= text.length) clearInterval(interval);
+  }, 18);
+}
+
+// Reads/updates the localStorage AI usage counter, resetting on a new day.
+function getAiUsage() {
+  const today = new Date().toISOString().slice(0, 10);
+  let usage;
+  try {
+    usage = JSON.parse(localStorage.getItem('sp_ai_usage'));
+  } catch (e) {
+    usage = null;
+  }
+  if (!usage || usage.date !== today) {
+    usage = { count: 0, date: today };
+  }
+  return usage;
+}
+
+// Increments and persists the AI usage counter for today.
+function incrementAiUsage() {
+  const usage = getAiUsage();
+  usage.count += 1;
+  localStorage.setItem('sp_ai_usage', JSON.stringify(usage));
+}
+
+// Entry point for the AI-backed briefing path, including daily limit and key handling.
+function renderAiBriefing() {
+  const usage = getAiUsage();
+  if (usage.count >= CONFIG.AI_DAILY_LIMIT) {
+    renderRuleBasedBriefing();
+    return;
+  }
+
+  const apiKey = CONFIG.ANTHROPIC_API_KEY || sessionStorage.getItem('sp_api_key');
+  if (!apiKey) {
+    renderApiKeyPrompt();
+    return;
+  }
+
+  requestAiBriefing(apiKey);
+}
+
+// Shows an inline API key input inside the briefing card.
+function renderApiKeyPrompt() {
+  const body = document.getElementById('briefing-body');
+  body.innerHTML = `
+    <div class="api-key-prompt">
+      <input type="password" id="api-key-input" placeholder="Paste Anthropic API key" class="api-key-input">
+      <button class="btn-primary btn-small" id="api-key-submit">Enable AI</button>
+    </div>`;
+  document.getElementById('api-key-submit').addEventListener('click', () => {
+    const key = document.getElementById('api-key-input').value.trim();
+    if (!key) return;
+    sessionStorage.setItem('sp_api_key', key);
+    requestAiBriefing(key);
+  });
+}
+
+// Animates "Generating briefing..." dots while the API call is in flight.
+function renderGeneratingPlaceholder() {
+  const body = document.getElementById('briefing-body');
+  let dots = 0;
+  body.textContent = 'Generating briefing';
+  const interval = setInterval(() => {
+    dots = (dots + 1) % 4;
+    body.textContent = 'Generating briefing' + '.'.repeat(dots);
+  }, 400);
+  return interval;
+}
+
+// Builds the top-5 priority item summary used in the AI prompt.
+function buildTopItemsForPrompt() {
+  return [...APP.computed]
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 5);
+}
+
+// Sends the inventory summary to the Anthropic API and renders the response.
+function requestAiBriefing(apiKey) {
+  const placeholderInterval = renderGeneratingPlaceholder();
+
+  const expired = APP.today.filter(r => r.days_until_expiration < 0).length;
+  const urgent = APP.today.filter(r => r.days_until_expiration >= 0 && r.days_until_expiration <= 3).length;
+  const expiringSoon = APP.today.filter(r => r.days_until_expiration >= 4 && r.days_until_expiration <= 7).length;
+  const belowThreshold = APP.today.filter(r => r.quantity_in_stock <= r.minimum_stock_threshold).length;
+  const topItems = buildTopItemsForPrompt();
+
+  const prompt = `You are an assistant for a dairy inventory coordinator.
+Today is ${new Date().toDateString()}.
+Current inventory summary:
+- ${expired} expired batches (remove immediately)
+- ${urgent} expiring in 0–3 days (urgent action needed)
+- ${expiringSoon} expiring in 4–7 days (plan to move)
+- ${belowThreshold} products below minimum stock threshold
+Top 5 items by priority: ${topItems.map(i => `${i.product_name} ${i.brand} (${i.quantity_in_stock} ${i.unit}, expires in ${i.days_until_expiration} days)`).join('; ')}
+
+Write a 3–4 sentence plain-English morning briefing for the coordinator.
+Be specific about product names and quantities.
+Tell them what to focus on first and why.
+Do not use bullet points. Do not use markdown.`;
+
+  fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 400,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('AI request failed');
+      return res.json();
+    })
+    .then(data => {
+      clearInterval(placeholderInterval);
+      const text = data.content[0].text;
+      incrementAiUsage();
+      typewrite(document.getElementById('briefing-body'), text);
+    })
+    .catch(() => {
+      clearInterval(placeholderInterval);
+      renderRuleBasedBriefing();
+    });
+}
+
+// ------------------------------------------------------------
+// INSIGHTS VIEW — HISTORICAL AGGREGATION
+// ------------------------------------------------------------
+
+// Pre-aggregates HIST_DATA into monthly sales, brand sales, channel sales, and spoilage datasets.
+function aggregateHistorical() {
+  const monthlyMap = new Map();
+  const brandMap = new Map();
+  const channelMap = new Map();
+  const spoilageMap = new Map();
+
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  APP.hist.forEach(r => {
+    const date = new Date(r.inventory_date);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const label = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+    if (!monthlyMap.has(key)) monthlyMap.set(key, { label, value: 0 });
+    monthlyMap.get(key).value += r.quantity_sold;
+
+    brandMap.set(r.brand, (brandMap.get(r.brand) || 0) + r.quantity_sold);
+    channelMap.set(r.sales_channel, (channelMap.get(r.sales_channel) || 0) + r.quantity_sold);
+
+    if (r.expiration_status === 'Expired') {
+      spoilageMap.set(r.product_name, (spoilageMap.get(r.product_name) || 0) + r.quantity_in_stock);
+    }
+  });
+
+  const monthlySales = [...monthlyMap.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([, v]) => v);
+  const brandSales = [...brandMap.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  const channelSales = [...channelMap.entries()].map(([label, value]) => ({ label, value }));
+  const spoilage = [...spoilageMap.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+
+  APP.aggregates = { monthlySales, brandSales, channelSales, spoilage };
+}
+
+// Renders (or re-renders) all 4 insights charts using Chart.js.
+function renderInsights() {
+  Object.values(APP.charts).forEach(chart => chart.destroy());
+  APP.charts = {};
+
+  const fontFamily = 'Inter';
+
+  APP.charts.monthly = new Chart(document.getElementById('chart-monthly'), {
+    type: 'line',
+    data: {
+      labels: APP.aggregates.monthlySales.map(d => d.label),
+      datasets: [{
+        data: APP.aggregates.monthlySales.map(d => d.value),
+        borderColor: '#7F77DD',
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+      }],
+    },
+    options: chartOptions(fontFamily, false),
+  });
+
+  const brandColors = ['#7F77DD', '#1D9E75', '#D85A30', '#D4537E', '#378ADD', '#639922', '#BA7517', '#E24B4A', '#534AB7', '#0F6E56', '#993C1D'];
+  APP.charts.brand = new Chart(document.getElementById('chart-brand'), {
+    type: 'bar',
+    data: {
+      labels: APP.aggregates.brandSales.map(d => d.label),
+      datasets: [{
+        data: APP.aggregates.brandSales.map(d => d.value),
+        backgroundColor: APP.aggregates.brandSales.map((_, i) => brandColors[i % brandColors.length]),
+      }],
+    },
+    options: Object.assign(chartOptions(fontFamily, false), { indexAxis: 'y' }),
+  });
+
+  APP.charts.channel = new Chart(document.getElementById('chart-channel'), {
+    type: 'doughnut',
+    data: {
+      labels: APP.aggregates.channelSales.map(d => d.label),
+      datasets: [{
+        data: APP.aggregates.channelSales.map(d => d.value),
+        backgroundColor: APP.aggregates.channelSales.map(d => (
+          d.label === 'Retail' ? '#7F77DD' : d.label === 'Wholesale' ? '#1D9E75' : '#BA7517'
+        )),
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { family: fontFamily } } },
+      },
+    },
+  });
+
+  APP.charts.spoilage = new Chart(document.getElementById('chart-spoilage'), {
+    type: 'bar',
+    data: {
+      labels: APP.aggregates.spoilage.map(d => d.label),
+      datasets: [{
+        data: APP.aggregates.spoilage.map(d => d.value),
+        backgroundColor: '#D85A30',
+      }],
+    },
+    options: chartOptions(fontFamily, false),
+  });
+}
+
+// Returns shared Chart.js options (fonts, grid lines, responsiveness).
+function chartOptions(fontFamily) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: { font: { family: fontFamily } },
+      },
+      y: {
+        grid: { color: '#EDEBE4' },
+        ticks: { font: { family: fontFamily } },
+      },
+    },
   };
+}
 
-  const inputRows = [
-    { label: 'Quantity on hand', value: `${formatNumber(quantityOnHand)} units` },
-    { label: 'Sales rate', value: `${formatNumber(salesRate)} units/day` },
-    { label: 'Reorder threshold', value: `${formatNumber(reorderThreshold)} units` },
-    { label: 'Reorder quantity', value: `${formatNumber(reorderQuantity)} units` },
-    { label: 'Expiration date', value: formatDateDisplay(row.expiration_date) },
+// ------------------------------------------------------------
+// FEFO VIEW
+// ------------------------------------------------------------
+
+// Opens the FEFO matrix view for a given product name.
+function openFefo(productName) {
+  const lots = APP.today.filter(r => r.product_name === productName)
+    .sort((a, b) => new Date(a.expiration_date) - new Date(b.expiration_date));
+
+  document.getElementById('fefo-title').textContent = `${productName} — FEFO Matrix`;
+
+  const totalQty = lots.reduce((sum, r) => sum + r.quantity_in_stock, 0);
+  const unit = lots[0] ? lots[0].unit : '';
+  document.getElementById('fefo-summary').textContent = `${lots.length} lots · ${totalQty} ${unit} total in stock`;
+
+  renderShelfBar(lots, totalQty);
+  renderLotTable(lots);
+
+  showView('fefo-view');
+}
+
+// Renders the shelf-life segmented bar (red/amber/green by expiry zone).
+function renderShelfBar(lots, totalQty) {
+  const red = lots.filter(r => r.days_until_expiration <= 2);
+  const amber = lots.filter(r => r.days_until_expiration >= 3 && r.days_until_expiration <= 7);
+  const green = lots.filter(r => r.days_until_expiration >= 8);
+
+  const zones = [
+    { qty: red.reduce((s, r) => s + r.quantity_in_stock, 0), color: '#D85A30' },
+    { qty: amber.reduce((s, r) => s + r.quantity_in_stock, 0), color: '#BA7517' },
+    { qty: green.reduce((s, r) => s + r.quantity_in_stock, 0), color: '#1D9E75' },
   ];
 
-  if (daysRemaining <= RESTOCK_DAYS_THRESHOLD) {
-    return {
-      ...base,
-      flag: 'RESTOCK',
-      reason: `Runs out in ${formatNumber(daysRemaining)} days. Order ${formatNumber(reorderQuantity)} units.`,
-      value: formatNumber(reorderQuantity),
-      unitLabel: 'units',
-      details: {
-        rows: [
-          ...inputRows,
-          { label: 'Days of stock remaining', value: `${formatNumber(quantityOnHand)} ÷ ${formatNumber(salesRate)} = ${formatNumber(daysRemaining)} days` },
-        ],
-        explanation: `Flagged RESTOCK because ${formatNumber(daysRemaining)} days of stock remaining is ${RESTOCK_DAYS_THRESHOLD} days or fewer.`,
-      },
-    };
-  }
-
-  if (unitsExpiringUnsold > 0 && daysUntilExpiry <= CLEAR_DAYS_THRESHOLD) {
-    return {
-      ...base,
-      flag: 'CLEAR',
-      reason: `${formatNumber(unitsExpiringUnsold)} units expire in ${formatNumber(daysUntilExpiry)} days before they sell.`,
-      value: formatNumber(daysUntilExpiry),
-      unitLabel: 'days left',
-      details: {
-        rows: [
-          ...inputRows,
-          { label: 'Days until expiry', value: `${formatNumber(daysUntilExpiry)} days` },
-          { label: 'Units expiring unsold', value: `${formatNumber(quantityOnHand)} − (${formatNumber(salesRate)} × ${formatNumber(daysUntilExpiry)}) = ${formatNumber(unitsExpiringUnsold)}` },
-        ],
-        explanation: `Flagged CLEAR because ${formatNumber(unitsExpiringUnsold)} units would still be unsold when this expires in ${formatNumber(daysUntilExpiry)} days (${CLEAR_DAYS_THRESHOLD} days or fewer away).`,
-      },
-    };
-  }
-
-  if (daysRemaining > normalCycle * 2) {
-    return {
-      ...base,
-      flag: 'HOLD',
-      reason: `${formatNumber(daysRemaining)} days of stock. Skip reorder this cycle.`,
-      value: formatNumber(daysRemaining),
-      unitLabel: 'days',
-      details: {
-        rows: [
-          ...inputRows,
-          { label: 'Days of stock remaining', value: `${formatNumber(quantityOnHand)} ÷ ${formatNumber(salesRate)} = ${formatNumber(daysRemaining)} days` },
-          { label: 'Normal reorder cycle', value: `${formatNumber(reorderThreshold)} ÷ ${formatNumber(salesRate)} = ${formatNumber(normalCycle)} days` },
-        ],
-        explanation: `Flagged HOLD because ${formatNumber(daysRemaining)} days of stock remaining is more than double the normal ${formatNumber(normalCycle)}-day reorder cycle.`,
-      },
-    };
-  }
-
-  return null;
+  const bar = document.getElementById('shelf-bar');
+  bar.innerHTML = zones.filter(z => z.qty > 0).map(z => {
+    const pct = totalQty ? (z.qty / totalQty) * 100 : 0;
+    return `<div class="shelf-segment" style="width:${pct}%;background:${z.color};">${z.qty} (${pct.toFixed(0)}%)</div>`;
+  }).join('');
 }
 
-function groupByFlag(rows) {
-  const grouped = { RESTOCK: [], CLEAR: [], HOLD: [] };
-  rows.forEach((row) => {
-    const result = evaluateProduct(row);
-    if (result) grouped[result.flag].push(result);
-  });
-  return grouped;
+// Renders the FEFO lot table sorted by expiration date ascending.
+function renderLotTable(lots) {
+  const body = document.getElementById('lot-table-body');
+  body.innerHTML = lots.map(r => {
+    const d = r.days_until_expiration;
+    let status, badgeClass, rowClass = '';
+    if (d < 0) { status = 'Expired'; badgeClass = 'badge-red'; rowClass = 'row-expired'; }
+    else if (d <= 3) { status = 'Urgent'; badgeClass = 'badge-orange'; }
+    else if (d <= 7) { status = 'Expiring Soon'; badgeClass = 'badge-amber'; }
+    else { status = 'Safe'; badgeClass = 'badge-green'; }
+
+    return `<tr class="${rowClass}">
+      <td>${escapeHtml(r.batch_id)}</td>
+      <td>${escapeHtml(r.brand)}</td>
+      <td>${escapeHtml(r.production_date)}</td>
+      <td>${escapeHtml(r.expiration_date)}</td>
+      <td>${r.quantity_in_stock} ${escapeHtml(r.unit)}</td>
+      <td>${d}</td>
+      <td><span class="badge ${badgeClass}">${status}</span></td>
+    </tr>`;
+  }).join('');
 }
 
-/* FEFO catalog (per-product lot grouping) */
-
-function bucketForDays(days) {
-  if (days <= FEFO_RED_MAX_DAYS) return 'RED';
-  if (days <= FEFO_YELLOW_MAX_DAYS) return 'YELLOW';
-  return 'GREEN';
-}
-
-function buildCatalog(rows) {
-  const catalog = {};
-  rows.forEach((row) => {
-    const quantityOnHand = parseFloat(row.quantity_on_hand);
-    const daysUntilExpiry = (parseDateUTC(row.expiration_date) - todayUTC()) / MS_PER_DAY;
-    const parsedCost = parseFloat(row.unit_cost);
-    const unitCost = Number.isFinite(parsedCost) ? parsedCost : null;
-
-    if (!catalog[row.product_name]) {
-      catalog[row.product_name] = { category: row.category, totalQuantity: 0, totalValue: 0, lots: [] };
-    }
-    const product = catalog[row.product_name];
-    product.totalQuantity += quantityOnHand;
-    if (unitCost !== null) product.totalValue += quantityOnHand * unitCost;
-    product.lots.push({
-      lotNumber: row.lot_number,
-      storageBin: row.storage_bin,
-      quantityOnHand,
-      expirationDate: row.expiration_date,
-      daysUntilExpiry,
-      bucket: bucketForDays(daysUntilExpiry),
-      unitCost,
-      value: unitCost !== null ? quantityOnHand * unitCost : null,
-    });
-  });
-
-  Object.values(catalog).forEach((product) => {
-    product.lots.sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
-    product.hasAnyCost = product.lots.some((lot) => lot.unitCost !== null);
-    product.hasFullCost = product.lots.every((lot) => lot.unitCost !== null);
-  });
-
-  return catalog;
-}
-
-/* Formatting helpers */
-
-function formatScannedAt(date) {
-  const datePart = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const timePart = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  return `${datePart} • ${timePart}`;
-}
-
-/* Rendering results */
-
-function buildDetailsPanel(details) {
-  const panel = document.createElement('div');
-  panel.className = 'result-card-details';
-  panel.hidden = true;
-
-  const grid = document.createElement('div');
-  grid.className = 'detail-grid';
-  details.rows.forEach(({ label, value }) => {
-    const row = document.createElement('div');
-    row.className = 'detail-row';
-    const labelEl = document.createElement('span');
-    labelEl.className = 'detail-label';
-    labelEl.textContent = label;
-    const valueEl = document.createElement('span');
-    valueEl.className = 'detail-value';
-    valueEl.textContent = value;
-    row.appendChild(labelEl);
-    row.appendChild(valueEl);
-    grid.appendChild(row);
-  });
-
-  const explanation = document.createElement('p');
-  explanation.className = 'detail-explanation';
-  explanation.textContent = details.explanation;
-
-  panel.appendChild(grid);
-  panel.appendChild(explanation);
-  return panel;
-}
-
-function buildResultCard(sectionClassName, item) {
-  const card = document.createElement('div');
-  card.className = 'result-card';
-
-  const row = document.createElement('div');
-  row.className = 'result-card-row';
-
-  const main = document.createElement('div');
-  main.className = 'result-card-main';
-
-  const statusLabel = document.createElement('p');
-  statusLabel.className = 'result-card-status';
-  statusLabel.innerHTML = `${STATUS_ICON_SVG[item.flag]}<span>${item.flag}</span>`;
-
-  const name = document.createElement('button');
-  name.type = 'button';
-  name.className = 'result-card-name product-name-btn';
-  name.textContent = item.productName;
-  name.addEventListener('click', () => showProductDetail(item.productName));
-
-  const category = document.createElement('p');
-  category.className = 'result-card-category';
-  category.textContent = item.category;
-
-  const reason = document.createElement('p');
-  reason.className = 'result-card-reason';
-  reason.textContent = item.reason;
-
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'result-card-toggle';
-  const toggleLabel = document.createElement('span');
-  toggleLabel.textContent = 'View calculation';
-  const toggleIcon = document.createElement('span');
-  toggleIcon.className = 'result-card-toggle-icon';
-  toggleIcon.textContent = '▾';
-  toggle.appendChild(toggleLabel);
-  toggle.appendChild(toggleIcon);
-
-  main.appendChild(statusLabel);
-  main.appendChild(name);
-  main.appendChild(category);
-
-  const product = currentCatalog[item.productName];
-  if (product && product.lots.length > 1) {
-    const lotBadge = document.createElement('p');
-    lotBadge.className = 'result-card-lot';
-    lotBadge.textContent = `Lot ${item.lotNumber} • Bin ${item.storageBin}`;
-    main.appendChild(lotBadge);
-  }
-
-  main.appendChild(reason);
-  main.appendChild(toggle);
-
-  const side = document.createElement('div');
-  side.className = 'result-card-side';
-
-  const value = document.createElement('p');
-  value.className = 'result-card-value';
-  value.textContent = item.value;
-  const unit = document.createElement('span');
-  unit.textContent = item.unitLabel;
-  value.appendChild(unit);
-
-  const checkboxLabel = document.createElement('label');
-  checkboxLabel.className = 'result-card-checkbox';
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox';
-  const checkboxText = document.createElement('span');
-  checkboxText.textContent = 'Mark as reviewed';
-  checkboxLabel.appendChild(checkbox);
-  checkboxLabel.appendChild(checkboxText);
-
-  checkbox.addEventListener('change', () => {
-    if (checkbox.checked) {
-      reviewedCount += 1;
-      card.classList.add('is-reviewed');
-      checkboxText.textContent = 'Reviewed ✓';
-    } else {
-      reviewedCount -= 1;
-      card.classList.remove('is-reviewed');
-      checkboxText.textContent = 'Mark as reviewed';
-    }
-    updateFooter();
-  });
-
-  side.appendChild(value);
-  side.appendChild(checkboxLabel);
-
-  row.appendChild(main);
-  row.appendChild(side);
-
-  const detailsPanel = buildDetailsPanel(item.details);
-
-  toggle.addEventListener('click', () => {
-    const isExpanded = toggle.classList.toggle('is-expanded');
-    detailsPanel.hidden = !isExpanded;
-    toggleLabel.textContent = isExpanded ? 'Hide calculation' : 'View calculation';
-  });
-
-  card.appendChild(row);
-  card.appendChild(detailsPanel);
-  return card;
-}
-
-function buildSectionPanel(key, items) {
-  const panel = document.createElement('div');
-  panel.className = `results-panel results-panel--${key.toLowerCase()}`;
-
-  const description = document.createElement('p');
-  description.className = 'results-panel-description';
-  description.textContent = SECTION_DESCRIPTIONS[key];
-  panel.appendChild(description);
-
-  items.forEach((item) => panel.appendChild(buildResultCard(key.toLowerCase(), item)));
-  return panel;
-}
-
-function activateTab(tabsBar, panelsWrap, key) {
-  tabsBar.querySelectorAll('.results-tab').forEach((btn) => {
-    btn.classList.toggle('is-active', btn.dataset.section === key);
-  });
-  panelsWrap.querySelectorAll('.results-panel').forEach((panel) => {
-    panel.hidden = panel.dataset.section !== key;
-  });
-}
-
-function buildResultsTabs(sections) {
-  const tabsBar = document.createElement('div');
-  tabsBar.className = 'results-tabs';
-  const panelsWrap = document.createElement('div');
-  panelsWrap.className = 'results-panels';
-
-  sections.forEach(({ key, label, items }) => {
-    const tabBtn = document.createElement('button');
-    tabBtn.type = 'button';
-    tabBtn.className = `results-tab results-tab--${key.toLowerCase()}`;
-    tabBtn.dataset.section = key;
-
-    const dot = document.createElement('span');
-    dot.className = 'results-tab-dot';
-    const labelEl = document.createElement('span');
-    labelEl.textContent = label;
-    const count = document.createElement('span');
-    count.className = 'results-tab-count';
-    count.textContent = items.length;
-
-    tabBtn.appendChild(dot);
-    tabBtn.appendChild(labelEl);
-    tabBtn.appendChild(count);
-    tabBtn.addEventListener('click', () => activateTab(tabsBar, panelsWrap, key));
-    tabsBar.appendChild(tabBtn);
-
-    const panel = buildSectionPanel(key, items);
-    panel.dataset.section = key;
-    panelsWrap.appendChild(panel);
-  });
-
-  activateTab(tabsBar, panelsWrap, sections[0].key);
-
-  const wrapper = document.createElement('div');
-  wrapper.appendChild(tabsBar);
-  wrapper.appendChild(panelsWrap);
-  return wrapper;
-}
-
-function renderSummaryCards(grouped) {
-  summaryCardsEl.innerHTML = '';
-
-  [
-    { key: 'RESTOCK', label: 'Restock', count: grouped.RESTOCK.length },
-    { key: 'CLEAR', label: 'Clear', count: grouped.CLEAR.length },
-    { key: 'HOLD', label: 'Hold', count: grouped.HOLD.length },
-  ].forEach(({ key, label, count }) => {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = `summary-card summary-card--${key.toLowerCase()}`;
-    card.disabled = count === 0;
-
-    const countEl = document.createElement('p');
-    countEl.className = 'summary-card-count';
-    countEl.textContent = count;
-
-    const labelEl = document.createElement('p');
-    labelEl.className = 'summary-card-label';
-    labelEl.innerHTML = `${STATUS_ICON_SVG[key]}<span>${label}</span>`;
-
-    card.appendChild(countEl);
-    card.appendChild(labelEl);
-
-    if (count > 0) {
-      card.addEventListener('click', () => {
-        const tabBtn = resultsFeed.querySelector(`.results-tab[data-section="${key}"]`);
-        if (tabBtn) tabBtn.click();
-      });
-    }
-
-    summaryCardsEl.appendChild(card);
-  });
-}
-
-function renderUrgentTable(grouped) {
-  const urgentItems = [...grouped.RESTOCK, ...grouped.CLEAR]
-    .slice()
-    .sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
-
-  if (urgentItems.length === 0) {
-    urgentSection.hidden = true;
-    return;
-  }
-
-  urgentSection.hidden = false;
-  urgentTableWrap.innerHTML = '';
-
-  const table = document.createElement('table');
-  table.className = 'lot-table';
-
-  const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th>Product</th><th>Lot</th><th>Quantity</th><th>Expiry DTE</th><th>Status</th></tr>';
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  urgentItems.forEach((item) => {
-    const tr = document.createElement('tr');
-    tr.className = 'clickable-row';
-    tr.addEventListener('click', () => showProductDetail(item.productName));
-
-    const daysLabel = item.daysUntilExpiry < 0
-      ? `Expired ${formatNumber(Math.abs(item.daysUntilExpiry))}d ago`
-      : `${formatNumber(item.daysUntilExpiry)} days`;
-    const statusBadge = `<span class="bucket-badge status-badge bucket-badge--${item.flag.toLowerCase()}">${STATUS_ICON_SVG[item.flag]}<span>${item.flag}</span></span>`;
-
-    const cells = [
-      item.productName,
-      item.lotNumber,
-      `${formatNumber(item.quantityOnHand)} units`,
-      daysLabel,
-      statusBadge,
-    ];
-
-    cells.forEach((html, i) => {
-      const td = document.createElement('td');
-      if (i === cells.length - 1) {
-        td.innerHTML = html;
-      } else {
-        td.textContent = html;
-      }
-      tr.appendChild(td);
-    });
-
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-
-  urgentTableWrap.appendChild(table);
-}
-
-function updateFooter() {
-  if (reviewedCount === totalFlaggedCount) {
-    resultsFooter.classList.add('is-complete');
-    resultsFooter.innerHTML = '';
-    const headline = document.createElement('p');
-    headline.className = 'results-footer-complete-headline';
-    headline.textContent = "You're on top of it.";
-    const subtext = document.createElement('p');
-    subtext.textContent = 'See you tomorrow morning.';
-    resultsFooter.appendChild(headline);
-    resultsFooter.appendChild(subtext);
-  } else {
-    resultsFooter.classList.remove('is-complete');
-    resultsFooter.textContent = `${reviewedCount} of ${totalFlaggedCount} items reviewed`;
-  }
-}
-
-function renderResults(grouped, totalScanned) {
-  reviewedCount = 0;
-  totalFlaggedCount = grouped.RESTOCK.length + grouped.CLEAR.length + grouped.HOLD.length;
-
-  resultsFeed.innerHTML = '';
-  resultsMeta.textContent = `Scanned ${totalScanned} product${totalScanned === 1 ? '' : 's'} • ${formatScannedAt(new Date())}`;
-
-  if (totalFlaggedCount === 0) {
-    resultsCount.textContent = "You're on top of it.";
-    summaryCardsEl.hidden = true;
-    urgentSection.hidden = true;
-    resultsFeed.hidden = true;
-    emptyState.hidden = false;
-    resultsFooter.hidden = true;
-    return;
-  }
-
-  resultsCount.textContent = `${totalFlaggedCount} product${totalFlaggedCount === 1 ? '' : 's'} need attention.`;
-  summaryCardsEl.hidden = false;
-  emptyState.hidden = true;
-  resultsFeed.hidden = false;
-  resultsFooter.hidden = false;
-
-  renderSummaryCards(grouped);
-  renderUrgentTable(grouped);
-
-  const sections = [
-    { key: 'RESTOCK', label: 'Restock', items: grouped.RESTOCK },
-    { key: 'CLEAR', label: 'Clear', items: grouped.CLEAR },
-    { key: 'HOLD', label: 'Hold', items: grouped.HOLD },
-  ].filter((section) => section.items.length > 0);
-
-  resultsFeed.appendChild(buildResultsTabs(sections));
-
-  updateFooter();
-}
-
-/* Product detail (FEFO Matrix) */
-
-function buildFefoBar(product) {
-  fefoBar.innerHTML = '';
-  fefoBarLegend.innerHTML = '';
-
-  const totals = { RED: 0, YELLOW: 0, GREEN: 0 };
-  product.lots.forEach((lot) => {
-    totals[lot.bucket] += lot.quantityOnHand;
-  });
-
-  ['RED', 'YELLOW', 'GREEN'].forEach((bucket) => {
-    const pct = product.totalQuantity > 0 ? (totals[bucket] / product.totalQuantity) * 100 : 0;
-    if (pct > 0) {
-      const segment = document.createElement('div');
-      segment.className = `fefo-bar-segment fefo-bar-segment--${bucket.toLowerCase()}`;
-      segment.style.width = `${pct}%`;
-      fefoBar.appendChild(segment);
-    }
-
-    const legendItem = document.createElement('span');
-    const dot = document.createElement('span');
-    dot.className = 'fefo-bar-legend-dot';
-    dot.style.background = `var(--${bucket === 'RED' ? 'restock' : bucket === 'YELLOW' ? 'yellow' : 'green'})`;
-    legendItem.appendChild(dot);
-    legendItem.appendChild(document.createTextNode(`${bucket === 'RED' ? 'Red' : bucket === 'YELLOW' ? 'Yellow' : 'Green'}: ${formatNumber(pct)}%`));
-    fefoBarLegend.appendChild(legendItem);
-  });
-}
-
-function buildLotTable(product) {
-  lotTableWrap.innerHTML = '';
-
-  const table = document.createElement('table');
-  table.className = 'lot-table';
-
-  const thead = document.createElement('thead');
-  thead.innerHTML = `<tr><th>Lot</th><th>Bin</th><th>Quantity</th>${product.hasAnyCost ? '<th>Unit cost</th><th>Value</th>' : ''}<th>Expires</th><th>Days to expiry</th></tr>`;
-  table.appendChild(thead);
-
-  const tbody = document.createElement('tbody');
-  product.lots.forEach((lot) => {
-    const tr = document.createElement('tr');
-
-    const daysLabel = lot.daysUntilExpiry < 0
-      ? `Expired ${formatNumber(Math.abs(lot.daysUntilExpiry))}d ago`
-      : `${formatNumber(lot.daysUntilExpiry)} days`;
-
-    const badge = `<span class="bucket-badge bucket-badge--${lot.bucket.toLowerCase()}">${lot.bucket}</span>`;
-
-    const cells = [
-      lot.lotNumber,
-      lot.storageBin,
-      `${formatNumber(lot.quantityOnHand)} units`,
-    ];
-    if (product.hasAnyCost) {
-      cells.push(lot.unitCost !== null ? formatCurrency(lot.unitCost) : '—');
-      cells.push(lot.value !== null ? formatCurrency(lot.value) : '—');
-    }
-    cells.push(formatDateDisplay(lot.expirationDate));
-    cells.push(`${daysLabel} ${badge}`);
-
-    cells.forEach((html, i) => {
-      const td = document.createElement('td');
-      if (i === cells.length - 1) {
-        td.innerHTML = html;
-      } else {
-        td.textContent = html;
-      }
-      tr.appendChild(td);
-    });
-
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-
-  lotTableWrap.appendChild(table);
-}
-
-function showProductDetail(productName) {
-  const product = currentCatalog[productName];
-  if (!product) return;
-
-  productViewName.textContent = productName;
-  let meta = `${product.category} • ${formatNumber(product.totalQuantity)} units across ${product.lots.length} lot${product.lots.length === 1 ? '' : 's'}`;
-  if (product.hasAnyCost) {
-    meta += ` • ${formatCurrency(product.totalValue)} value${product.hasFullCost ? '' : ' (partial)'}`;
-  }
-  productViewMeta.textContent = meta;
-
-  buildFefoBar(product);
-  buildLotTable(product);
-
-  switchView(resultsView, productView);
-}
-
-backToResultsBtn.addEventListener('click', () => {
-  switchView(productView, resultsView);
-});
-
-printPickListBtn.addEventListener('click', () => {
-  window.print();
-});
-
-/* View + loading state */
-
-function switchView(fromEl, toEl) {
-  fromEl.classList.add('view-hidden');
-  setTimeout(() => {
-    fromEl.hidden = true;
-    fromEl.classList.remove('view-hidden');
-    toEl.hidden = false;
-    toEl.classList.add('view-hidden');
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        toEl.classList.remove('view-hidden');
-      });
-    });
-  }, VIEW_TRANSITION_MS);
-}
-
-function startLoading() {
-  uploadView.classList.add('is-loading');
-  dropzoneIdle.hidden = true;
-  dropzoneLoading.hidden = false;
-}
-
-function stopLoading() {
-  uploadView.classList.remove('is-loading');
-  dropzoneIdle.hidden = false;
-  dropzoneLoading.hidden = true;
-}
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/* Submit handling */
-
-uploadForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  clearError();
-
-  const file = fileInput.files[0];
-  if (!file) return;
-
-  if (!isCSVFile(file)) {
-    showError('Please upload a CSV file (.csv).');
-    return;
-  }
-
-  startLoading();
-  const minDelay = wait(MIN_LOADING_MS);
-
-  try {
-    const text = await readFileAsText(file);
-    const rows = parseCSVText(text);
-    await minDelay;
-    currentCatalog = buildCatalog(rows);
-    const grouped = groupByFlag(rows);
-    renderResults(grouped, rows.length);
-    stopLoading();
-    newUploadBtn.hidden = false;
-    switchView(uploadView, resultsView);
-  } catch (err) {
-    await minDelay;
-    stopLoading();
-    showError(err.message || 'Something went wrong reading this file.');
-  }
-});
-
-newUploadBtn.addEventListener('click', () => {
-  fileInput.value = '';
-  filenameEl.textContent = '';
-  submitBtn.disabled = true;
-  clearError();
-  switchView(resultsView, uploadView);
-});
-
-/* Sample CSV download */
-
-downloadSampleBtn.addEventListener('click', () => {
-  const blob = new Blob([SAMPLE_CSV], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'sample_inventory.csv';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-});
+// ------------------------------------------------------------
+// BOOTSTRAP
+// ------------------------------------------------------------
+
+loadData();
