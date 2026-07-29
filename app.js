@@ -694,6 +694,27 @@ function aggregateHistorical() {
   APP.aggregates = { monthlySales, brandSales, channelSales, spoilage };
 }
 
+// Draws the numeric value at the end of each bar (used on the horizontal brand chart).
+const barEndLabelPlugin = {
+  id: 'barEndLabelPlugin',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = "600 12px 'Inter', sans-serif";
+    ctx.fillStyle = '#5F5E5A';
+    ctx.textBaseline = 'middle';
+    chart.data.datasets.forEach((dataset, di) => {
+      const meta = chart.getDatasetMeta(di);
+      meta.data.forEach((bar, i) => {
+        const value = dataset.data[i];
+        ctx.textAlign = 'left';
+        ctx.fillText(value.toLocaleString(), bar.x + 6, bar.y);
+      });
+    });
+    ctx.restore();
+  },
+};
+
 // Renders (or re-renders) all 4 insights charts using Chart.js.
 function renderInsights() {
   Object.values(APP.charts).forEach(chart => chart.destroy());
@@ -728,8 +749,10 @@ function renderInsights() {
       }],
     },
     options: Object.assign(chartOptions(fontFamily, false), { indexAxis: 'y' }),
+    plugins: [barEndLabelPlugin],
   });
 
+  const channelTotal = APP.aggregates.channelSales.reduce((s, d) => s + d.value, 0);
   APP.charts.channel = new Chart(document.getElementById('chart-channel'), {
     type: 'doughnut',
     data: {
@@ -745,7 +768,21 @@ function renderInsights() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { font: { family: fontFamily } } },
+        legend: {
+          position: 'bottom',
+          labels: {
+            font: { family: fontFamily },
+            generateLabels: (chart) => chart.data.labels.map((label, i) => {
+              const value = chart.data.datasets[0].data[i];
+              const pct = channelTotal ? Math.round((value / channelTotal) * 100) : 0;
+              return {
+                text: `${label} (${pct}%)`,
+                fillStyle: chart.data.datasets[0].backgroundColor[i],
+                index: i,
+              };
+            }),
+          },
+        },
       },
     },
   });
