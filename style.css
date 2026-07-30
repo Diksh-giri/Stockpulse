@@ -528,12 +528,6 @@ ul {
   width: 32px;
 }
 
-.urgent-done-checkbox {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
 .urgent-row.reviewed {
   opacity: 0.5;
 }
@@ -735,13 +729,67 @@ ul {
   color: var(--text-muted);
 }
 
-.review-checkbox {
-  display: flex;
+.review-toggle {
+  position: relative;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+.review-toggle-input {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.review-toggle-circle {
+  position: relative;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 180ms ease, border-color 180ms ease, transform 150ms ease;
+}
+
+.review-toggle-input:checked + .review-toggle-circle {
+  background: var(--purple);
+  border-color: var(--purple);
+  transform: scale(1.08);
+}
+
+.review-toggle-circle svg {
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 150ms ease 60ms, transform 150ms ease 60ms;
+}
+
+.review-toggle-input:checked + .review-toggle-circle svg {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.review-toggle-input:hover + .review-toggle-circle {
+  border-color: var(--purple);
+}
+
+.review-toggle-input:focus-visible + .review-toggle-circle {
+  outline: 2px solid var(--purple-light);
+  outline-offset: 2px;
+}
+
+.review-toggle-text {
+  color: var(--text-secondary);
 }
 
 .review-footer {

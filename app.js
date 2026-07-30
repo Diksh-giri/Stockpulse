@@ -365,9 +365,7 @@ function renderUrgentLots() {
     const reason = buildReason(r);
     const reviewed = APP.reviewed.has(r.batch_id);
     return `<tr class="urgent-row ${reviewed ? 'reviewed' : ''}" data-product="${escapeHtml(r.product_name)}">
-      <td class="urgent-done-cell">
-        <input type="checkbox" class="urgent-done-checkbox" data-batch="${r.batch_id}" ${reviewed ? 'checked' : ''} title="Mark as reviewed">
-      </td>
+      <td class="urgent-done-cell">${reviewToggleHtml(r.batch_id, reviewed, false)}</td>
       <td>${i + 1}</td>
       <td class="product-link">
         ${escapeHtml(r.product_name)}
@@ -385,7 +383,7 @@ function renderUrgentLots() {
   body.querySelectorAll('.urgent-row').forEach(row => {
     row.addEventListener('click', () => openFefo(row.dataset.product));
   });
-  body.querySelectorAll('.urgent-done-checkbox').forEach(cb => {
+  body.querySelectorAll('.review-toggle-input').forEach(cb => {
     cb.addEventListener('click', e => e.stopPropagation());
     cb.addEventListener('change', () => toggleReviewed(cb.dataset.batch, cb.checked));
   });
@@ -498,6 +496,21 @@ function buildReason(r) {
 // Renders the filtered product feed as expandable cards with review checkboxes.
 // Reviewed items sink to the bottom (still visible, just muted) so the top of the
 // list always shows what's left to handle.
+// Builds the markup for the custom round checkmark toggle used to mark a batch reviewed.
+// withLabel adds the "Mark as reviewed" text (used in the feed card); the table's Done
+// column omits it since the column header already says "Done".
+function reviewToggleHtml(batchId, reviewed, withLabel) {
+  return `<label class="review-toggle">
+    <input type="checkbox" class="review-toggle-input" data-batch="${batchId}" ${reviewed ? 'checked' : ''}>
+    <span class="review-toggle-circle">
+      <svg width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M1 4L3.5 6.5L9 1" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    ${withLabel ? '<span class="review-toggle-text">Mark as reviewed</span>' : ''}
+  </label>`;
+}
+
 function renderFeed() {
   const rows = [...getFilteredRows()].sort((a, b) => {
     const ra = APP.reviewed.has(a.batch_id) ? 1 : 0;
@@ -539,10 +552,7 @@ function renderFeed() {
           <span class="detail-label">Reorder qty</span><span>${r.reorder_quantity}</span>
         </div>
       </div>
-      <label class="review-checkbox">
-        <input type="checkbox" data-batch="${r.batch_id}" ${reviewed ? 'checked' : ''}>
-        Mark as reviewed
-      </label>
+      ${reviewToggleHtml(r.batch_id, reviewed, true)}
     </div>`;
   }).join('');
 
@@ -555,7 +565,8 @@ function renderFeed() {
       panel.style.display = panel.style.display === 'none' ? '' : 'none';
     });
   });
-  list.querySelectorAll('.review-checkbox input').forEach(cb => {
+  list.querySelectorAll('.review-toggle-input').forEach(cb => {
+    cb.addEventListener('click', e => e.stopPropagation());
     cb.addEventListener('change', () => toggleReviewed(cb.dataset.batch, cb.checked));
   });
 }
