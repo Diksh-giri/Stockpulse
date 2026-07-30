@@ -137,6 +137,7 @@ function computeToday() {
 // Runs all one-time setup after data has loaded: calculations, aggregation, landing render.
 function initApp() {
   computeToday();
+  loadReviewedFromStorage();
   aggregateHistorical();
   renderLandingStats();
   bindGlobalEvents();
@@ -206,29 +207,42 @@ function renderLandingStats() {
 // DASHBOARD — SUMMARY CARDS
 // ------------------------------------------------------------
 
-// Renders the 3 summary cards (Restock/Clear/Hold) with counts and subtext.
+// Renders the 3 summary cards (Restock/Clear/Hold). Restock and Clear show the count of
+// items still awaiting review (not the raw flag total), so the cards double as a live
+// to-do tracker that shrinks as the coordinator works through their morning.
 function renderSummaryCards() {
+  const isUnreviewed = r => !APP.reviewed.has(r.batch_id);
   const restock = APP.computed.filter(r => r.flag === 'RESTOCK');
   const clear = APP.computed.filter(r => r.flag === 'CLEAR');
   const hold = APP.computed.filter(r => r.flag === 'HOLD');
   const unflagged = APP.computed.filter(r => !r.flag);
 
-  document.getElementById('count-restock').textContent = restock.length;
-  document.getElementById('count-clear').textContent = clear.length;
+  const restockRemaining = restock.filter(isUnreviewed);
+  const clearRemaining = clear.filter(isUnreviewed);
+
+  document.getElementById('count-restock').textContent = restockRemaining.length;
+  document.getElementById('count-clear').textContent = clearRemaining.length;
   document.getElementById('count-hold').textContent = hold.length;
 
-  const restockQty = restock.reduce((sum, r) => sum + r.reorder_quantity, 0);
-  document.getElementById('subtext-restock').textContent = `Total reorder qty: ${restockQty}`;
+  document.getElementById('progress-restock').textContent = restock.length
+    ? `${restock.length - restockRemaining.length} of ${restock.length} reviewed`
+    : '';
+  document.getElementById('progress-clear').textContent = clear.length
+    ? `${clear.length - clearRemaining.length} of ${clear.length} reviewed`
+    : '';
 
-  const alreadyExpired = clear.filter(r => r.days_until_expiry < 0).length;
-  const stillTicking = clear.filter(r => r.days_until_expiry >= 0);
+  const restockQty = restockRemaining.reduce((sum, r) => sum + r.reorder_quantity, 0);
+  document.getElementById('subtext-restock').textContent = `Reorder qty remaining: ${restockQty}`;
+
+  const alreadyExpired = clearRemaining.filter(r => r.days_until_expiry < 0).length;
+  const stillTicking = clearRemaining.filter(r => r.days_until_expiry >= 0);
   const avgDays = stillTicking.length
     ? (stillTicking.reduce((sum, r) => sum + r.days_until_expiry, 0) / stillTicking.length)
     : 0;
   let clearSubtext;
-  if (clear.length === 0) {
+  if (clearRemaining.length === 0) {
     clearSubtext = '';
-  } else if (alreadyExpired === clear.length) {
+  } else if (alreadyExpired === clearRemaining.length) {
     clearSubtext = `All ${alreadyExpired} already expired`;
   } else if (alreadyExpired > 0) {
     clearSubtext = `${alreadyExpired} already expired · avg ${avgDays.toFixed(1)}d left for the rest`;
@@ -310,7 +324,12 @@ function toggleTimelineFilter(key) {
 // URGENT_LOTS_CAP rows by default so the list doesn't grow unbounded as inventory scales.
 function renderUrgentLots() {
   const urgent = APP.computed.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR')
-    .sort((a, b) => b.priority - a.priority);
+    .sort((a, b) => {
+      const ra = APP.reviewed.has(a.batch_id) ? 1 : 0;
+      const rb = APP.reviewed.has(b.batch_id) ? 1 : 0;
+      if (ra !== rb) return ra - rb;
+      return b.priority - a.priority;
+    });
 
   const section = document.getElementById('urgent-lots-section');
   if (urgent.length === 0) {
@@ -319,11 +338,13 @@ function renderUrgentLots() {
   }
   section.style.display = '';
 
+  const remaining = urgent.filter(r => !APP.reviewed.has(r.batch_id)).length;
   const showAll = APP.urgentExpanded || urgent.length <= URGENT_LOTS_CAP;
   const visible = showAll ? urgent : urgent.slice(0, URGENT_LOTS_CAP);
 
-  document.getElementById('urgent-lots-title').textContent =
-    `Urgent lots — ranked by priority (${urgent.length})`;
+  document.getElementById('urgent-lots-title').textContent = remaining === urgent.length
+    ? `Urgent lots — ranked by priority (${urgent.length})`
+    : `Urgent lots — ranked by priority (${remaining} of ${urgent.length} remaining)`;
 
   const toggle = document.getElementById('urgent-lots-toggle');
   if (urgent.length <= URGENT_LOTS_CAP) {
@@ -342,7 +363,11 @@ function renderUrgentLots() {
       ? `Order ${r.reorder_quantity} ${r.unit}`
       : `Move ${r.quantity_in_stock} ${r.unit}`;
     const reason = buildReason(r);
-    return `<tr class="urgent-row" data-product="${escapeHtml(r.product_name)}">
+    const reviewed = APP.reviewed.has(r.batch_id);
+    return `<tr class="urgent-row ${reviewed ? 'reviewed' : ''}" data-product="${escapeHtml(r.product_name)}">
+      <td class="urgent-done-cell">
+        <input type="checkbox" class="urgent-done-checkbox" data-batch="${r.batch_id}" ${reviewed ? 'checked' : ''} title="Mark as reviewed">
+      </td>
       <td>${i + 1}</td>
       <td class="product-link">
         ${escapeHtml(r.product_name)}
@@ -359,6 +384,10 @@ function renderUrgentLots() {
 
   body.querySelectorAll('.urgent-row').forEach(row => {
     row.addEventListener('click', () => openFefo(row.dataset.product));
+  });
+  body.querySelectorAll('.urgent-done-checkbox').forEach(cb => {
+    cb.addEventListener('click', e => e.stopPropagation());
+    cb.addEventListener('change', () => toggleReviewed(cb.dataset.batch, cb.checked));
   });
 }
 
@@ -383,16 +412,19 @@ function setFeedTab(filter) {
   renderFeed();
 }
 
-// Renders live item counts onto each feed tab label, e.g. "Needs Action (23)".
+// Renders live item counts onto each feed tab label. Restock/Clear/Needs Action show
+// remaining (not-yet-reviewed) counts so the tabs double as a to-do list; Hold/All stay
+// as totals since those items were never something to act on in the first place.
 function renderFeedTabCounts() {
-  const restock = APP.computed.filter(r => r.flag === 'RESTOCK').length;
-  const clear = APP.computed.filter(r => r.flag === 'CLEAR').length;
+  const isUnreviewed = r => !APP.reviewed.has(r.batch_id);
+  const restockRemaining = APP.computed.filter(r => r.flag === 'RESTOCK' && isUnreviewed(r)).length;
+  const clearRemaining = APP.computed.filter(r => r.flag === 'CLEAR' && isUnreviewed(r)).length;
   const hold = APP.computed.filter(r => r.flag === 'HOLD').length;
   const total = APP.computed.length;
 
-  document.getElementById('feed-tab-action').textContent = `Needs Action (${restock + clear})`;
-  document.getElementById('feed-tab-restock').textContent = `Restock (${restock})`;
-  document.getElementById('feed-tab-clear').textContent = `Clear (${clear})`;
+  document.getElementById('feed-tab-action').textContent = `Needs Action (${restockRemaining + clearRemaining})`;
+  document.getElementById('feed-tab-restock').textContent = `Restock (${restockRemaining})`;
+  document.getElementById('feed-tab-clear').textContent = `Clear (${clearRemaining})`;
   document.getElementById('feed-tab-hold').textContent = `Hold (${hold})`;
   document.getElementById('feed-tab-all').textContent = `All (${total})`;
 }
@@ -464,8 +496,15 @@ function buildReason(r) {
 }
 
 // Renders the filtered product feed as expandable cards with review checkboxes.
+// Reviewed items sink to the bottom (still visible, just muted) so the top of the
+// list always shows what's left to handle.
 function renderFeed() {
-  const rows = getFilteredRows();
+  const rows = [...getFilteredRows()].sort((a, b) => {
+    const ra = APP.reviewed.has(a.batch_id) ? 1 : 0;
+    const rb = APP.reviewed.has(b.batch_id) ? 1 : 0;
+    if (ra !== rb) return ra - rb;
+    return b.priority - a.priority;
+  });
   const list = document.getElementById('feed-list');
 
   list.innerHTML = rows.map(r => {
@@ -517,19 +556,49 @@ function renderFeed() {
     });
   });
   list.querySelectorAll('.review-checkbox input').forEach(cb => {
-    cb.addEventListener('change', () => {
-      if (cb.checked) APP.reviewed.add(cb.dataset.batch);
-      else APP.reviewed.delete(cb.dataset.batch);
-      document.querySelector(`.product-card[data-batch="${cb.dataset.batch}"]`).classList.toggle('reviewed', cb.checked);
-      renderReviewFooter();
-    });
+    cb.addEventListener('change', () => toggleReviewed(cb.dataset.batch, cb.checked));
   });
 }
 
-// Renders the sticky "X of Y reviewed" footer, updating live as checkboxes change.
+// Builds today's localStorage key for review state so it naturally resets each new day's data.
+function reviewStorageKey() {
+  return `sp_reviewed_${new Date().toISOString().slice(0, 10)}`;
+}
+
+// Loads today's reviewed batch_ids from localStorage into APP.reviewed.
+function loadReviewedFromStorage() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(reviewStorageKey()));
+    if (Array.isArray(raw)) APP.reviewed = new Set(raw);
+  } catch (e) {
+    APP.reviewed = new Set();
+  }
+}
+
+// Persists the current reviewed set to localStorage under today's key.
+function saveReviewedToStorage() {
+  localStorage.setItem(reviewStorageKey(), JSON.stringify([...APP.reviewed]));
+}
+
+// Marks (or unmarks) a batch as reviewed and re-renders every surface that reflects it —
+// this is the single entry point used by both the feed cards and the urgent lots table.
+function toggleReviewed(batchId, checked) {
+  if (checked) APP.reviewed.add(batchId);
+  else APP.reviewed.delete(batchId);
+  saveReviewedToStorage();
+  renderSummaryCards();
+  renderFeedTabCounts();
+  renderUrgentLots();
+  renderFeed();
+  renderReviewFooter();
+}
+
+// Renders the sticky review-progress footer. Only Restock/Clear items count toward
+// "done for the day" — Hold and no-action items were never something to act on.
 function renderReviewFooter() {
-  const total = APP.computed.length;
-  const reviewedCount = APP.reviewed.size;
+  const actionable = APP.computed.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR');
+  const total = actionable.length;
+  const reviewedCount = actionable.filter(r => APP.reviewed.has(r.batch_id)).length;
   const footer = document.getElementById('review-footer');
   const text = document.getElementById('review-footer-text');
   if (total === 0) {
@@ -538,8 +607,8 @@ function renderReviewFooter() {
   }
   footer.style.display = '';
   text.textContent = reviewedCount === total
-    ? 'All items reviewed — see you tomorrow 🌅'
-    : `${reviewedCount} of ${total} items reviewed`;
+    ? 'All caught up — see you tomorrow 🌅'
+    : `${reviewedCount} of ${total} action items reviewed`;
 }
 
 // Escapes HTML-sensitive characters to prevent injection when interpolating CSV values.

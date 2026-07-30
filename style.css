@@ -382,10 +382,17 @@ ul {
   margin-top: 4px;
 }
 
+.summary-progress {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--purple-dark);
+  margin-top: 8px;
+}
+
 .summary-subtext {
   font-size: 12px;
   color: var(--text-muted);
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 /* ---------------- Expiry timeline ---------------- */
@@ -515,6 +522,24 @@ ul {
 
 .row-expired {
   background: var(--red-light) !important;
+}
+
+.urgent-done-cell {
+  width: 32px;
+}
+
+.urgent-done-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.urgent-row.reviewed {
+  opacity: 0.5;
+}
+
+.urgent-row.reviewed .product-link {
+  text-decoration: line-through;
 }
 
 /* ---------------- Badges ---------------- */
