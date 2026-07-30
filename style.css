@@ -501,6 +501,7 @@ ul {
 
 .urgent-table tbody tr {
   cursor: pointer;
+  transition: opacity 260ms ease, transform 260ms ease;
 }
 
 .urgent-table tbody tr:hover {
@@ -526,14 +527,6 @@ ul {
 
 .urgent-done-cell {
   width: 32px;
-}
-
-.urgent-row.reviewed {
-  opacity: 0.5;
-}
-
-.urgent-row.reviewed .product-link {
-  text-decoration: line-through;
 }
 
 /* ---------------- Badges ---------------- */
@@ -612,7 +605,7 @@ ul {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px;
-  transition: opacity 200ms ease, border-color 150ms ease;
+  transition: opacity 260ms ease, transform 260ms ease, border-color 150ms ease;
 }
 
 .product-card:hover {
@@ -621,6 +614,12 @@ ul {
 
 .product-card.reviewed {
   opacity: 0.5;
+}
+
+.product-card.pending-reviewed,
+.urgent-row.pending-reviewed {
+  opacity: 0.35;
+  transform: scale(0.99);
 }
 
 .card-top-row {

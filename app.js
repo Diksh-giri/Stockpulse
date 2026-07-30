@@ -320,16 +320,14 @@ function toggleTimelineFilter(key) {
 // DASHBOARD — URGENT LOTS TABLE
 // ------------------------------------------------------------
 
-// Renders the urgent lots table (Restock + Clear items ranked by priority), capped to
-// URGENT_LOTS_CAP rows by default so the list doesn't grow unbounded as inventory scales.
+// Renders the urgent lots table (Restock + Clear items still awaiting review, ranked by
+// priority), capped to URGENT_LOTS_CAP rows by default so the list doesn't grow unbounded
+// as inventory scales. Reviewed items leave this table entirely — they live in the
+// Reviewed tab below once their confirm animation finishes.
 function renderUrgentLots() {
-  const urgent = APP.computed.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR')
-    .sort((a, b) => {
-      const ra = APP.reviewed.has(a.batch_id) ? 1 : 0;
-      const rb = APP.reviewed.has(b.batch_id) ? 1 : 0;
-      if (ra !== rb) return ra - rb;
-      return b.priority - a.priority;
-    });
+  const urgent = APP.computed
+    .filter(r => (r.flag === 'RESTOCK' || r.flag === 'CLEAR') && !APP.reviewed.has(r.batch_id))
+    .sort((a, b) => b.priority - a.priority);
 
   const section = document.getElementById('urgent-lots-section');
   if (urgent.length === 0) {
@@ -338,13 +336,11 @@ function renderUrgentLots() {
   }
   section.style.display = '';
 
-  const remaining = urgent.filter(r => !APP.reviewed.has(r.batch_id)).length;
   const showAll = APP.urgentExpanded || urgent.length <= URGENT_LOTS_CAP;
   const visible = showAll ? urgent : urgent.slice(0, URGENT_LOTS_CAP);
 
-  document.getElementById('urgent-lots-title').textContent = remaining === urgent.length
-    ? `Urgent lots — ranked by priority (${urgent.length})`
-    : `Urgent lots — ranked by priority (${remaining} of ${urgent.length} remaining)`;
+  document.getElementById('urgent-lots-title').textContent =
+    `Urgent lots — ranked by priority (${urgent.length})`;
 
   const toggle = document.getElementById('urgent-lots-toggle');
   if (urgent.length <= URGENT_LOTS_CAP) {
@@ -363,9 +359,8 @@ function renderUrgentLots() {
       ? `Order ${r.reorder_quantity} ${r.unit}`
       : `Move ${r.quantity_in_stock} ${r.unit}`;
     const reason = buildReason(r);
-    const reviewed = APP.reviewed.has(r.batch_id);
-    return `<tr class="urgent-row ${reviewed ? 'reviewed' : ''}" data-product="${escapeHtml(r.product_name)}">
-      <td class="urgent-done-cell">${reviewToggleHtml(r.batch_id, reviewed, false)}</td>
+    return `<tr class="urgent-row" data-product="${escapeHtml(r.product_name)}">
+      <td class="urgent-done-cell">${reviewToggleHtml(r.batch_id, false, false)}</td>
       <td>${i + 1}</td>
       <td class="product-link">
         ${escapeHtml(r.product_name)}
@@ -385,7 +380,7 @@ function renderUrgentLots() {
   });
   body.querySelectorAll('.review-toggle-input').forEach(cb => {
     cb.addEventListener('click', e => e.stopPropagation());
-    cb.addEventListener('change', () => toggleReviewed(cb.dataset.batch, cb.checked));
+    cb.addEventListener('change', () => handleReviewToggle(cb));
   });
 }
 
@@ -410,35 +405,42 @@ function setFeedTab(filter) {
   renderFeed();
 }
 
-// Renders live item counts onto each feed tab label. Restock/Clear/Needs Action show
-// remaining (not-yet-reviewed) counts so the tabs double as a to-do list; Hold/All stay
-// as totals since those items were never something to act on in the first place.
+// Renders live item counts onto each feed tab label. Needs Action/Restock/Clear/Hold all
+// show remaining (not-yet-reviewed) counts, since reviewed items move out to the Reviewed
+// tab; All stays a flat total as the one true "browse everything" view.
 function renderFeedTabCounts() {
   const isUnreviewed = r => !APP.reviewed.has(r.batch_id);
   const restockRemaining = APP.computed.filter(r => r.flag === 'RESTOCK' && isUnreviewed(r)).length;
   const clearRemaining = APP.computed.filter(r => r.flag === 'CLEAR' && isUnreviewed(r)).length;
-  const hold = APP.computed.filter(r => r.flag === 'HOLD').length;
+  const holdRemaining = APP.computed.filter(r => r.flag === 'HOLD' && isUnreviewed(r)).length;
   const total = APP.computed.length;
 
   document.getElementById('feed-tab-action').textContent = `Needs Action (${restockRemaining + clearRemaining})`;
   document.getElementById('feed-tab-restock').textContent = `Restock (${restockRemaining})`;
   document.getElementById('feed-tab-clear').textContent = `Clear (${clearRemaining})`;
-  document.getElementById('feed-tab-hold').textContent = `Hold (${hold})`;
+  document.getElementById('feed-tab-hold').textContent = `Hold (${holdRemaining})`;
+  document.getElementById('feed-tab-reviewed').textContent = `Reviewed (${APP.reviewed.size})`;
   document.getElementById('feed-tab-all').textContent = `All (${total})`;
 }
 
 // Applies all active filters (summary card, timeline segment, feed tab) to the computed rows.
-// 'ACTION' is a pseudo-filter meaning RESTOCK or CLEAR — the default view so a growing
-// inventory never forces the user to scroll past items that need no attention today.
+// 'ACTION' means RESTOCK or CLEAR (the default view). Every tab except 'ALL' and 'REVIEWED'
+// excludes already-reviewed items — they've moved to the Reviewed tab — so a growing
+// inventory never forces the user to scroll past work that's either done or not theirs to do.
 function getFilteredRows() {
   let rows = APP.computed;
+  const isUnreviewed = r => !APP.reviewed.has(r.batch_id);
 
   if (APP.activeSummaryFilter) {
     rows = rows.filter(r => r.flag === APP.activeSummaryFilter);
   } else if (APP.activeFeedTab === 'ACTION') {
-    rows = rows.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR');
-  } else if (APP.activeFeedTab !== 'ALL') {
-    rows = rows.filter(r => r.flag === APP.activeFeedTab);
+    rows = rows.filter(r => (r.flag === 'RESTOCK' || r.flag === 'CLEAR') && isUnreviewed(r));
+  } else if (APP.activeFeedTab === 'REVIEWED') {
+    rows = rows.filter(r => !isUnreviewed(r));
+  } else if (APP.activeFeedTab === 'ALL') {
+    // no filter — literal browse-everything view, reviewed items included
+  } else {
+    rows = rows.filter(r => r.flag === APP.activeFeedTab && isUnreviewed(r));
   }
 
   if (APP.activeTimelineFilter) {
@@ -524,7 +526,11 @@ function renderFeed() {
     const reason = buildReason(r);
     const badgeClass = r.flag === 'RESTOCK' ? 'badge-red' : r.flag === 'CLEAR' ? 'badge-amber' : r.flag === 'HOLD' ? 'badge-green' : 'badge-muted';
     const reviewed = APP.reviewed.has(r.batch_id);
-    return `<div class="product-card ${reviewed ? 'reviewed' : ''}" data-batch="${r.batch_id}">
+    // Dimming only helps distinguish reviewed items within a mixed list (the "All" tab) —
+    // inside the dedicated Reviewed tab, everything is reviewed, so dimming would just
+    // hurt legibility with no contrast benefit.
+    const dimReviewed = reviewed && APP.activeFeedTab !== 'REVIEWED';
+    return `<div class="product-card ${dimReviewed ? 'reviewed' : ''}" data-batch="${r.batch_id}">
       <div class="card-top-row">
         <span class="card-product-name" data-product="${escapeHtml(r.product_name)}">${escapeHtml(r.product_name)} <span class="card-brand">— ${escapeHtml(r.brand)}</span></span>
         <span class="badge ${badgeClass}">${r.flag || 'NONE'}</span>
@@ -567,8 +573,24 @@ function renderFeed() {
   });
   list.querySelectorAll('.review-toggle-input').forEach(cb => {
     cb.addEventListener('click', e => e.stopPropagation());
-    cb.addEventListener('change', () => toggleReviewed(cb.dataset.batch, cb.checked));
+    cb.addEventListener('change', () => handleReviewToggle(cb));
   });
+}
+
+// How long the in-place confirm animation plays before the item actually leaves its list.
+const REVIEW_ANIMATION_MS = 420;
+
+// Entry point for every review toggle click. Plays an in-place confirm animation (checkmark
+// pop + fade) on the card/row that was clicked, then commits the actual state change and
+// re-renders once the animation finishes — so items visibly settle instead of teleporting
+// the instant you click.
+function handleReviewToggle(cb) {
+  const batchId = cb.dataset.batch;
+  const checked = cb.checked;
+  const container = cb.closest('.product-card, .urgent-row');
+  if (container) container.classList.add('pending-reviewed');
+  cb.disabled = true;
+  setTimeout(() => toggleReviewed(batchId, checked), REVIEW_ANIMATION_MS);
 }
 
 // Builds today's localStorage key for review state so it naturally resets each new day's data.
