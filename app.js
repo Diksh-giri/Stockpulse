@@ -20,6 +20,7 @@ window.APP = {
   charts: {},             // Chart.js instances, keyed by canvas id
   aggregates: {},          // pre-aggregated historical datasets
   urgentExpanded: false,   // whether the urgent lots table shows all rows or just the top cap
+  dashboardInitialized: false, // whether triggerDashboard() has run yet this session
 };
 
 const URGENT_LOTS_CAP = 10; // urgent lots table shows this many rows before requiring "Show all"
@@ -145,17 +146,21 @@ function initApp() {
 
 // Wires up navigation and static event listeners that only need binding once.
 function bindGlobalEvents() {
-  document.getElementById('hero-cta').addEventListener('click', () => { showView('dashboard-view'); triggerDashboard(); });
-  document.getElementById('bottom-cta').addEventListener('click', () => { showView('dashboard-view'); triggerDashboard(); });
+  document.getElementById('hero-cta').addEventListener('click', goToDashboard);
+  document.getElementById('bottom-cta').addEventListener('click', goToDashboard);
   document.getElementById('back-to-landing').addEventListener('click', () => showView('landing-view'));
   document.getElementById('back-to-landing-2').addEventListener('click', () => showView('landing-view'));
-  document.getElementById('tab-dashboard').addEventListener('click', () => showView('dashboard-view'));
+  document.getElementById('tab-dashboard').addEventListener('click', goToDashboard);
   document.getElementById('tab-insights').addEventListener('click', () => { showView('insights-view'); renderInsights(); });
-  document.getElementById('tab-dashboard-2').addEventListener('click', () => showView('dashboard-view'));
+  document.getElementById('tab-dashboard-2').addEventListener('click', goToDashboard);
   document.getElementById('tab-insights-2').addEventListener('click', () => { showView('insights-view'); renderInsights(); });
-  document.getElementById('back-to-dashboard').addEventListener('click', () => showView('dashboard-view'));
+  document.getElementById('back-to-dashboard').addEventListener('click', goToDashboard);
   document.getElementById('print-picklist').addEventListener('click', () => window.print());
   document.getElementById('urgent-lots-toggle').addEventListener('click', toggleUrgentExpanded);
+
+  document.querySelectorAll('.logo-link').forEach(logo => {
+    logo.addEventListener('click', goToDashboard);
+  });
 
   document.querySelectorAll('.summary-card').forEach(card => {
     card.addEventListener('click', () => toggleSummaryFilter(card.dataset.flag));
@@ -164,6 +169,17 @@ function bindGlobalEvents() {
   document.querySelectorAll('.feed-tab').forEach(tab => {
     tab.addEventListener('click', () => setFeedTab(tab.dataset.filter));
   });
+}
+
+// Navigates to the dashboard from anywhere in the app (CTA buttons, nav tabs, or clicking
+// the logo). Only runs the full render (and its briefing typewriter) the first time —
+// after that, the dashboard is already live and just needs to be shown.
+function goToDashboard() {
+  showView('dashboard-view');
+  if (!APP.dashboardInitialized) {
+    triggerDashboard();
+    APP.dashboardInitialized = true;
+  }
 }
 
 // Shows the requested view and hides all others, with a fade transition.

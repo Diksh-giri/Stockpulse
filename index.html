@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>StockPulse — Dairy Inventory Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:wght@400;500;600&display=swap" rel="stylesheet">
@@ -18,7 +19,13 @@
 <!-- ============ LANDING VIEW ============ -->
 <div id="landing-view" class="view">
   <header class="landing-header">
-    <div class="logo"><span class="logo-dot"></span><span class="logo-text">StockPulse</span></div>
+    <div class="logo logo-link">
+      <svg class="logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="24" rx="6" fill="#7F77DD"/>
+        <path d="M3 12.5H7.5L9.5 6L14 19L16 12.5H21" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="logo-text">StockPulse</span>
+    </div>
   </header>
 
   <section class="hero">
@@ -73,7 +80,13 @@
 <!-- ============ DASHBOARD VIEW ============ -->
 <div id="dashboard-view" class="view" style="display:none;">
   <nav class="top-nav">
-    <div class="logo"><span class="logo-dot"></span><span class="logo-text">StockPulse</span></div>
+    <div class="logo logo-link">
+      <svg class="logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="24" rx="6" fill="#7F77DD"/>
+        <path d="M3 12.5H7.5L9.5 6L14 19L16 12.5H21" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="logo-text">StockPulse</span>
+    </div>
     <div class="nav-tabs">
       <button class="nav-tab active" id="tab-dashboard">Today's Inventory</button>
       <button class="nav-tab" id="tab-insights">Historical Insights</button>
@@ -153,7 +166,13 @@
 <!-- ============ INSIGHTS VIEW ============ -->
 <div id="insights-view" class="view" style="display:none;">
   <nav class="top-nav">
-    <div class="logo"><span class="logo-dot"></span><span class="logo-text">StockPulse</span></div>
+    <div class="logo logo-link">
+      <svg class="logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="24" rx="6" fill="#7F77DD"/>
+        <path d="M3 12.5H7.5L9.5 6L14 19L16 12.5H21" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="logo-text">StockPulse</span>
+    </div>
     <div class="nav-tabs">
       <button class="nav-tab" id="tab-dashboard-2">Today's Inventory</button>
       <button class="nav-tab active" id="tab-insights-2">Historical Insights</button>
@@ -188,7 +207,13 @@
 <!-- ============ FEFO VIEW ============ -->
 <div id="fefo-view" class="view" style="display:none;">
   <nav class="top-nav fefo-nav">
-    <div class="logo"><span class="logo-dot"></span><span class="logo-text">StockPulse</span></div>
+    <div class="logo logo-link">
+      <svg class="logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="24" rx="6" fill="#7F77DD"/>
+        <path d="M3 12.5H7.5L9.5 6L14 19L16 12.5H21" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="logo-text">StockPulse</span>
+    </div>
     <h2 class="fefo-title" id="fefo-title">FEFO Matrix</h2>
     <div class="fefo-nav-actions">
       <button class="btn-ghost" id="print-picklist">Print pick list</button>

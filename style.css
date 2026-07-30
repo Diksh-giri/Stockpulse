@@ -83,16 +83,20 @@ ul {
 .logo {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
-.logo-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--purple);
+.logo-link {
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+
+.logo-link:hover {
+  opacity: 0.8;
+}
+
+.logo-icon {
   flex-shrink: 0;
-  display: inline-block;
 }
 
 .logo-text {
