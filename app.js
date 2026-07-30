@@ -16,10 +16,13 @@ window.APP = {
   reviewed: new Set(),   // batch_ids marked as reviewed
   activeSummaryFilter: null,   // 'RESTOCK' | 'CLEAR' | 'HOLD' | null
   activeTimelineFilter: null,  // 'expired' | 'urgent' | 'soon' | 'safe' | null
-  activeFeedTab: 'ALL',
+  activeFeedTab: 'ACTION',
   charts: {},             // Chart.js instances, keyed by canvas id
   aggregates: {},          // pre-aggregated historical datasets
+  urgentExpanded: false,   // whether the urgent lots table shows all rows or just the top cap
 };
+
+const URGENT_LOTS_CAP = 10; // urgent lots table shows this many rows before requiring "Show all"
 
 // ------------------------------------------------------------
 // CSV PARSING
@@ -151,6 +154,7 @@ function bindGlobalEvents() {
   document.getElementById('tab-insights-2').addEventListener('click', () => { showView('insights-view'); renderInsights(); });
   document.getElementById('back-to-dashboard').addEventListener('click', () => showView('dashboard-view'));
   document.getElementById('print-picklist').addEventListener('click', () => window.print());
+  document.getElementById('urgent-lots-toggle').addEventListener('click', toggleUrgentExpanded);
 
   document.querySelectorAll('.summary-card').forEach(card => {
     card.addEventListener('click', () => toggleSummaryFilter(card.dataset.flag));
@@ -175,6 +179,7 @@ function showView(viewId) {
 // First-time setup when the dashboard is opened: render everything.
 function triggerDashboard() {
   renderSummaryCards();
+  renderFeedTabCounts();
   renderTimeline();
   renderUrgentLots();
   renderFeed();
@@ -215,8 +220,22 @@ function renderSummaryCards() {
   const restockQty = restock.reduce((sum, r) => sum + r.reorder_quantity, 0);
   document.getElementById('subtext-restock').textContent = `Total reorder qty: ${restockQty}`;
 
-  const avgDays = clear.length ? (clear.reduce((sum, r) => sum + r.days_until_expiry, 0) / clear.length) : 0;
-  document.getElementById('subtext-clear').textContent = `Avg ${avgDays.toFixed(1)} days remaining`;
+  const alreadyExpired = clear.filter(r => r.days_until_expiry < 0).length;
+  const stillTicking = clear.filter(r => r.days_until_expiry >= 0);
+  const avgDays = stillTicking.length
+    ? (stillTicking.reduce((sum, r) => sum + r.days_until_expiry, 0) / stillTicking.length)
+    : 0;
+  let clearSubtext;
+  if (clear.length === 0) {
+    clearSubtext = '';
+  } else if (alreadyExpired === clear.length) {
+    clearSubtext = `All ${alreadyExpired} already expired`;
+  } else if (alreadyExpired > 0) {
+    clearSubtext = `${alreadyExpired} already expired · avg ${avgDays.toFixed(1)}d left for the rest`;
+  } else {
+    clearSubtext = `Avg ${avgDays.toFixed(1)} days remaining`;
+  }
+  document.getElementById('subtext-clear').textContent = clearSubtext;
 
   document.getElementById('subtext-hold').textContent = `${unflagged.length} items need no action`;
 
@@ -287,7 +306,8 @@ function toggleTimelineFilter(key) {
 // DASHBOARD — URGENT LOTS TABLE
 // ------------------------------------------------------------
 
-// Renders the urgent lots table (Restock + Clear items ranked by priority).
+// Renders the urgent lots table (Restock + Clear items ranked by priority), capped to
+// URGENT_LOTS_CAP rows by default so the list doesn't grow unbounded as inventory scales.
 function renderUrgentLots() {
   const urgent = APP.computed.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR')
     .sort((a, b) => b.priority - a.priority);
@@ -299,15 +319,35 @@ function renderUrgentLots() {
   }
   section.style.display = '';
 
+  const showAll = APP.urgentExpanded || urgent.length <= URGENT_LOTS_CAP;
+  const visible = showAll ? urgent : urgent.slice(0, URGENT_LOTS_CAP);
+
+  document.getElementById('urgent-lots-title').textContent =
+    `Urgent lots — ranked by priority (${urgent.length})`;
+
+  const toggle = document.getElementById('urgent-lots-toggle');
+  if (urgent.length <= URGENT_LOTS_CAP) {
+    toggle.style.display = 'none';
+  } else {
+    toggle.style.display = '';
+    toggle.textContent = showAll
+      ? 'Show top 10 only'
+      : `Show all ${urgent.length} urgent lots`;
+  }
+
   const body = document.getElementById('urgent-table-body');
-  body.innerHTML = urgent.map((r, i) => {
+  body.innerHTML = visible.map((r, i) => {
     const badgeClass = r.flag === 'RESTOCK' ? 'badge-red' : 'badge-amber';
     const action = r.flag === 'RESTOCK'
       ? `Order ${r.reorder_quantity} ${r.unit}`
       : `Move ${r.quantity_in_stock} ${r.unit}`;
+    const reason = buildReason(r);
     return `<tr class="urgent-row" data-product="${escapeHtml(r.product_name)}">
       <td>${i + 1}</td>
-      <td class="product-link">${escapeHtml(r.product_name)}</td>
+      <td class="product-link">
+        ${escapeHtml(r.product_name)}
+        <span class="urgent-why">${escapeHtml(reason.text)}</span>
+      </td>
       <td>${escapeHtml(r.brand)}</td>
       <td>${escapeHtml(r.sales_channel)}</td>
       <td>${r.quantity_in_stock} ${escapeHtml(r.unit)}</td>
@@ -320,6 +360,12 @@ function renderUrgentLots() {
   body.querySelectorAll('.urgent-row').forEach(row => {
     row.addEventListener('click', () => openFefo(row.dataset.product));
   });
+}
+
+// Toggles between the capped top-10 urgent lots view and the full ranked list.
+function toggleUrgentExpanded() {
+  APP.urgentExpanded = !APP.urgentExpanded;
+  renderUrgentLots();
 }
 
 // ------------------------------------------------------------
@@ -337,12 +383,30 @@ function setFeedTab(filter) {
   renderFeed();
 }
 
+// Renders live item counts onto each feed tab label, e.g. "Needs Action (23)".
+function renderFeedTabCounts() {
+  const restock = APP.computed.filter(r => r.flag === 'RESTOCK').length;
+  const clear = APP.computed.filter(r => r.flag === 'CLEAR').length;
+  const hold = APP.computed.filter(r => r.flag === 'HOLD').length;
+  const total = APP.computed.length;
+
+  document.getElementById('feed-tab-action').textContent = `Needs Action (${restock + clear})`;
+  document.getElementById('feed-tab-restock').textContent = `Restock (${restock})`;
+  document.getElementById('feed-tab-clear').textContent = `Clear (${clear})`;
+  document.getElementById('feed-tab-hold').textContent = `Hold (${hold})`;
+  document.getElementById('feed-tab-all').textContent = `All (${total})`;
+}
+
 // Applies all active filters (summary card, timeline segment, feed tab) to the computed rows.
+// 'ACTION' is a pseudo-filter meaning RESTOCK or CLEAR — the default view so a growing
+// inventory never forces the user to scroll past items that need no attention today.
 function getFilteredRows() {
   let rows = APP.computed;
 
   if (APP.activeSummaryFilter) {
     rows = rows.filter(r => r.flag === APP.activeSummaryFilter);
+  } else if (APP.activeFeedTab === 'ACTION') {
+    rows = rows.filter(r => r.flag === 'RESTOCK' || r.flag === 'CLEAR');
   } else if (APP.activeFeedTab !== 'ALL') {
     rows = rows.filter(r => r.flag === APP.activeFeedTab);
   }
@@ -372,8 +436,17 @@ function buildReason(r) {
     };
   }
   if (r.flag === 'CLEAR') {
+    const qty = Math.max(Math.round(r.units_expiring_unsold), 0);
+    if (r.days_until_expiry < 0) {
+      return {
+        text: `${qty} ${r.unit} already expired ${Math.abs(r.days_until_expiry)} days ago — clear immediately.`,
+        keyNumber: Math.abs(r.days_until_expiry),
+        keyLabel: 'days overdue',
+        colorClass: 'text-red',
+      };
+    }
     return {
-      text: `${Math.max(Math.round(r.units_expiring_unsold), 0)} ${r.unit} expire in ${r.days_until_expiry} days before they sell.`,
+      text: `${qty} ${r.unit} expire in ${r.days_until_expiry} days before they sell.`,
       keyNumber: r.days_until_expiry,
       keyLabel: 'days left',
       colorClass: 'text-amber',
@@ -511,8 +584,11 @@ function buildRuleBasedBriefingText() {
     `${expired} expired batch${expired === 1 ? '' : 'es'} to remove and ${urgent} expiring within 3 days. `;
 
   if (topClear) {
+    const expiryPhrase = topClear.days_until_expiration < 0
+      ? `already expired ${Math.abs(topClear.days_until_expiration)} day(s) ago`
+      : `expiring in ${topClear.days_until_expiration} day(s)`;
     text += `Your top priority is ${topClear.product_name} (${topClear.brand}, ${topClear.quantity_in_stock} ${topClear.unit}) ` +
-      `expiring in ${topClear.days_until_expiration} day(s) — move or discount this stock now. `;
+      `${expiryPhrase} — move or discount this stock now. `;
   }
 
   if (zeroStock.length > 0) {

@@ -113,7 +113,10 @@
     </section>
 
     <section class="urgent-lots" id="urgent-lots-section" style="display:none;">
-      <h3>Urgent lots — ranked by priority</h3>
+      <div class="urgent-lots-header">
+        <h3 id="urgent-lots-title">Urgent lots — ranked by priority</h3>
+        <button class="link-btn" id="urgent-lots-toggle" style="display:none;"></button>
+      </div>
       <div class="table-wrap">
         <table class="urgent-table" id="urgent-table">
           <thead>
@@ -129,10 +132,11 @@
 
     <section class="product-feed">
       <div class="feed-tabs">
-        <button class="feed-tab active" data-filter="ALL">All</button>
-        <button class="feed-tab" data-filter="RESTOCK">Restock</button>
-        <button class="feed-tab" data-filter="CLEAR">Clear</button>
-        <button class="feed-tab" data-filter="HOLD">Hold</button>
+        <button class="feed-tab active" data-filter="ACTION" id="feed-tab-action">Needs Action</button>
+        <button class="feed-tab" data-filter="RESTOCK" id="feed-tab-restock">Restock</button>
+        <button class="feed-tab" data-filter="CLEAR" id="feed-tab-clear">Clear</button>
+        <button class="feed-tab" data-filter="HOLD" id="feed-tab-hold">Hold</button>
+        <button class="feed-tab" data-filter="ALL" id="feed-tab-all">All</button>
       </div>
       <div class="feed-list" id="feed-list"></div>
     </section>

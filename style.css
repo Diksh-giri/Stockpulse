@@ -443,10 +443,26 @@ ul {
   margin-bottom: 32px;
 }
 
-.urgent-lots h3 {
+.urgent-lots-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.urgent-lots-header h3 {
   font-size: 16px;
   font-weight: 600;
-  margin-bottom: 12px;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--purple-dark);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
 }
 
 .urgent-table, .lot-table {
@@ -487,6 +503,14 @@ ul {
 .product-link {
   color: var(--purple-dark);
   font-weight: 500;
+}
+
+.urgent-why {
+  display: block;
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 .row-expired {
