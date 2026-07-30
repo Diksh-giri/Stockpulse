@@ -1,102 +1,104 @@
 # StockPulse
 
-StockPulse is a morning inventory tool for dairy distribution coordinators. Upload your inventory CSV and it instantly tells you which products need attention today — what to restock, what to clear before it expires, and what to hold off reordering — plus a per-product FEFO breakdown when you need to see which specific lot is driving the flag. Everything runs in your browser; no server, no upload, no account.
+StockPulse is a morning inventory tool for dairy distribution coordinators. It reads today's inventory automatically — no upload, no login — and tells you what needs attention right now: what to restock, what to clear before it expires, and what to leave alone. A per-product FEFO (First-Expired-First-Out) view shows exactly which physical lot to move first, and a historical Insights view breaks down four years of sales and spoilage data. Everything runs in the browser; no server, no account, no build step.
 
-This is the client-side MVP milestone of a larger planned platform (see `Dairy Inventory MVP Strategy.md`): a future phase adds a real backend, live Google Sheets sync, and SMS/email alerts, but the calculations and views here carry over unchanged.
+This is a client-side demo milestone of a larger planned platform (see `Dairy Inventory MVP Strategy.md`): a future phase adds a real backend, live inventory sync, and alerts, but the calculations and views here carry over unchanged.
 
 ## Running it
 
-Open `index.html` directly in any modern browser (double-click it, or `open index.html` from the project folder). That's it — there's nothing to install or build.
+Serve the folder with any static file server and open it in a browser, for example:
 
-## How it works, step by step
+```
+python3 -m http.server 8000
+```
 
-**1. Upload**
-Drag a CSV onto the drop zone (or click it to browse), or click "Download sample CSV" first to get a ready-made file to try. The "Check inventory" button stays disabled until a file is selected.
+then visit `http://localhost:8000/index.html`. A local server is recommended because the app loads its data with `fetch()`, which Chrome and most Chromium-based browsers block when a page is opened directly via `file://` (Firefox is more permissive and may work either way). There's nothing to install — no npm, no dependencies beyond the Google Fonts and Chart.js CDN links already in `index.html`.
 
-**2. Scanning**
-Clicking "Check inventory" reads the file entirely in your browser (via the FileReader API — the file never leaves your machine) and runs the calculations described below on every row.
+## Data
 
-**3. Results (the morning dashboard)**
-At the top, three summary cards show how many products are flagged Restock, Clear, and Hold — click a card to jump straight to that tab. Below that, an **Urgent lots requiring action** table lists every Restock- and Clear-flagged lot together, soonest-to-expire first, with a colored Restock/Clear status badge — click any row to open that product's FEFO Matrix. Further down, the same three tabs group every flagged product, each showing a count. If nothing needs attention, you'll see "You're on top of it." instead.
+On load, StockPulse fetches two CSVs from the project root and never modifies either:
 
-Each flagged product shows:
-- The product name (click it to open the FEFO Matrix for that product — see below) and category
-- If the file has multiple rows (lots) for the same product, a small "Lot ... • Bin ..." line identifying which lot triggered this flag
-- A plain-English reason (e.g. "Runs out in 4 days. Order 60 units.")
-- A large number showing the key figure (units to order, days left, or days of stock)
-- A "View calculation" toggle that expands to show the exact numbers and arithmetic behind the flag, and a one-line explanation of why it was flagged
-- A "Mark as reviewed" checkbox — checked items fade to half-opacity so you can track what you've already dealt with. The footer at the bottom shows "X of Y items reviewed" and switches to a "See you tomorrow morning" message once everything is reviewed.
+- **`today_data.csv`** — a snapshot of today's inventory (40 batches) that drives the Dashboard and FEFO views.
+- **`historical_data.csv`** — four years of daily inventory records (2019–2022, ~2,200 rows) that drives the Insights charts.
 
-Click "New upload" at any time to go back and check another file.
+Both are plain CSVs with a header row; see the column list at the bottom of this file.
 
-**4. The FEFO Matrix (per-product lot view)**
-Clicking any product name (in the urgent table or in a result card) opens its FEFO (First-Expired-First-Out) Matrix: a shelf-life bar showing what share of that product's total stock is Red (expiring in 2 days or less, or already expired), Yellow (3–7 days), or Green (more than 7 days) — followed by a table of every lot for that product, sorted soonest-to-expire first, with lot number, storage bin, quantity, expiration date, and days-to-expiry. If the CSV includes `unit_cost`, the header also shows the product's total inventory value and the lot table gains Unit Cost and Value columns. This surfaces risk that a product-level total can hide: a product can look fine on aggregate (plenty of total stock) while one specific lot is quietly about to expire unsold.
+## The four views
 
-Click **"Print pick list"** to print the page or save it as a PDF (via your browser's print dialog) — useful for handing a physical pick list to a warehouse operator. Click "Back" to return to the dashboard.
+**Landing** — the entry screen. Three live stat cards (products expiring this week, products below minimum stock, batches needing action today) are computed from today's data as soon as it loads. Click "Open dashboard →" — or the StockPulse logo, which is clickable from anywhere in the app and always returns to the dashboard — to get to work.
+
+**Dashboard (Today's Inventory)** — the main working view:
+- An **AI Morning Briefing** panel summarizes the day in a few sentences. By default this is a rule-based sentence built from real numbers (expired count, urgent count, top priority item); see [AI Briefing](#ai-briefing) below for the optional live-API mode.
+- Three **summary cards** (Restock / Clear / Hold) show how many items in each category are still awaiting review, with a "X of Y reviewed" progress line and a click-to-filter behavior.
+- An **expiry timeline** bar segments all 40 items into Expired, Urgent (0–3 days), Expiring Soon (4–7 days), and Safe (8+ days) — click a segment to filter the feed to that band.
+- An **Urgent Lots table** ranks every Restock/Clear item by priority (financial exposure weighted by urgency), capped at the top 10 with a "Show all N" expand so the table stays readable no matter how large the inventory grows. Each row shows the plain-English reason it's flagged and a "Mark as reviewed" button.
+- A **product feed** with six tabs — Needs Action (the default), Restock, Clear, Hold, Reviewed, and All — each showing a live count. Needs Action, Restock, Clear, and Hold all exclude items you've already reviewed; the Reviewed tab is where those live, and All is the one true "browse everything" view. Each card shows the reason, a labeled key number (e.g. "28 · liters to order"), and an expandable "View details" panel with the underlying figures.
+
+**Historical Insights** — four Chart.js charts built from `historical_data.csv`: monthly sales volume (line), total units sold by brand (horizontal bar with value labels), sales by channel (doughnut with percentage legend), and historically expired units by product (bar).
+
+**FEFO Matrix** — opened by clicking any product name. Shows a shelf-life bar (share of stock that's Expired/Critical, Expiring Soon, or Safe) and a lot table sorted soonest-to-expire first, so you know exactly which batch to move before which. "Print pick list" opens the browser's print dialog with everything but the lot table hidden.
+
+## Marking items reviewed
+
+Each item has a "Mark as reviewed" button (feed cards and the Urgent Lots table both use it, kept in sync). Clicking it plays a brief in-place confirm animation, then the item moves to the Reviewed tab — clicking it again there undoes it, moving the item back. Review state is saved to `localStorage` under a date-scoped key, so it survives a page refresh but naturally resets once the next day's `today_data.csv` is in place. The sticky footer at the bottom of the dashboard tracks "X of Y action items reviewed" and switches to a completion message once every Restock/Clear item has been handled.
 
 ## What Restock, Clear, and Hold mean
 
-- **Restock** (red, ▲) — this product is about to run out. Order more now.
-- **Clear** (amber, ⏱) — this product will expire before it sells through at the current pace. Move it or discount it now.
-- **Hold** (green, ✓) — this product has more than enough stock for its normal reorder cycle. Skip ordering it this time.
-
-Each status has both a color and an icon — a plain red/amber/green traffic-light convention chosen because it's the standard severity language for inventory and ops dashboards, with an icon on every badge so the status still reads correctly for colorblind users or in grayscale (color is never the only signal). Cards get a soft tint of their status color as a background, not just a colored border, so the three categories stay easy to tell apart at a glance without looking like an alarm panel.
-
-A product only ever gets one flag, checked in that priority order (Restock beats Clear beats Hold). If none of the rules apply, the product simply doesn't appear — it's fine as-is.
-
-## The calculations
-
-For every valid row, StockPulse computes:
+For every row in `today_data.csv`, StockPulse computes:
 
 | Term | Formula |
 |---|---|
-| `days_remaining` | `quantity_on_hand / sales_rate` |
-| `days_until_expiry` | days between today and `expiration_date` |
-| `units_expiring_unsold` | `quantity_on_hand - (sales_rate * days_until_expiry)` |
-| `normal_cycle` | `reorder_threshold / sales_rate` |
+| `sales_rate` | `quantity_sold / 30` |
+| `days_remaining` | `quantity_in_stock / sales_rate` (999 if `sales_rate` is 0) |
+| `units_expiring_unsold` | `quantity_in_stock - (sales_rate * max(days_until_expiration, 0))` |
+| `normal_cycle` | `minimum_stock_threshold / sales_rate` (999 if `sales_rate` is 0) |
 
-**Restock** — flagged if `days_remaining` is 5 days or fewer.
-> Reason shown: "Runs out in X days. Order Y units." (Y = `reorder_quantity` from the CSV)
+Checked in this order, first match wins:
 
-**Clear** — flagged if `units_expiring_unsold` is greater than 0 **and** `days_until_expiry` is 7 days or fewer.
-> Reason shown: "X units expire in Y days before they sell."
+- **Restock** — `days_remaining` is 5 days or fewer. *"Runs out in X days. Order Y [unit]."*
+- **Clear** — `units_expiring_unsold` is greater than 0 **and** `days_until_expiration` is 7 days or fewer (already-expired stock qualifies too — shown as *"already expired X days ago"* rather than a confusing negative day count). *"X [unit] already expired Y days ago"* or *"X [unit] expire in Y days before they sell."*
+- **Hold** — `days_remaining` is more than double `normal_cycle`. *"X days of stock. Skip reorder this cycle."*
+- If none apply, the item carries no flag and needs no action.
 
-**Hold** — flagged if `days_remaining` is more than double `normal_cycle`.
-> Reason shown: "X days of stock. Skip reorder this cycle."
+A **priority** score ranks flagged items for the Urgent Lots table: `(quantity_in_stock * reorder_quantity) / max(days_until_expiration, 1)`, or `quantity_in_stock * reorder_quantity * 1000` for already-expired stock, so the most financially exposed and most urgent items sort to the top.
 
-These three checks run in order (Restock, then Clear, then Hold) and stop at the first match, so a product is never flagged twice.
+## AI Briefing
+
+At the top of `app.js`:
+
+```js
+const CONFIG = {
+  USE_AI_BRIEFING: false,    // true = Anthropic API  |  false = rule-based (free, instant)
+  AI_DAILY_LIMIT: 3,         // per-browser daily cap (localStorage). Only used when USE_AI_BRIEFING: true
+  ANTHROPIC_API_KEY: '',     // paste key here to bake it in, or leave blank for user-input field
+};
+```
+
+Flip `USE_AI_BRIEFING` to `true` to have the briefing generated by the Anthropic API instead of the rule-based sentence builder — that's the only code change needed. With no key baked into `ANTHROPIC_API_KEY`, the dashboard shows a small inline field to paste one in (stored in `sessionStorage`, not persisted beyond the tab). Usage is capped per browser per day via `AI_DAILY_LIMIT`; once the cap is hit, or if the API call fails for any reason (network, auth, rate limit), StockPulse silently falls back to the rule-based briefing — no error is ever shown to the user.
 
 ## CSV format
 
-The file must have a header row including at least these required column names (case-sensitive):
+Both files share the same core columns (`historical_data.csv` adds two more):
 
 ```
-product_name, category, quantity_on_hand, reorder_threshold, reorder_quantity, expiration_date, sales_rate
+batch_id, inventory_date, product_name, brand, unit, packaging_type, sales_channel,
+production_date, expiration_date, quantity_received, quantity_sold, quantity_in_stock,
+expected_stock, stock_discrepancy, minimum_stock_threshold, reorder_quantity,
+days_until_expiration
 ```
 
-Three extra columns are optional:
-
-```
-lot_number, storage_bin, unit_cost
-```
-
-If you omit `lot_number`/`storage_bin`, StockPulse auto-generates a lot number (`LOT-1`, `LOT-2`, ...) and a placeholder bin (`—`) per row, so existing files without these columns still work unchanged. `unit_cost` (a plain decimal, e.g. `2.10`) unlocks a total inventory value on the FEFO Matrix page — omit it and value just isn't shown, nothing else changes.
-
-- `expiration_date` must be in `YYYY-MM-DD` format.
-- Rows that are missing required values, have non-numeric quantities, or have an unparseable date are silently skipped — they don't stop the rest of the file from being processed.
-- If the file is empty, has the wrong extension, is missing required columns, or has no valid rows at all, an inline error message explains what to fix.
-- A product can appear on more than one row if it has multiple active lots (different batches with different expiration dates/quantities). Each lot row is still flagged independently for Restock/Clear/Hold, and all of a product's lots roll up together into its FEFO Matrix.
-
-`sample_inventory.csv` in this folder (or the "Download sample CSV" link on the upload page) contains a ready-to-use example with a mix of all three flags, a `unit_cost` on every row, and one product (Skim Milk 1L) split across two lots to demonstrate the FEFO Matrix.
+`historical_data.csv` additionally has `stock_status` and `expiration_status` columns (used to compute historical spoilage in the Insights view). Dates are `YYYY-MM-DD`; there are no quoted fields, so parsing is a plain comma split.
 
 ## Project files
 
 ```
 stockpulse/
-├── index.html   — page structure and markup for the upload, results/dashboard, and FEFO Matrix views
-├── style.css    — all styling (Inter + Fraunces fonts, colors, layout, responsive rules)
-├── app.js       — CSV parsing, the FEFO catalog, the three calculations, and all interactivity
-└── sample_inventory.csv — example file for testing, including a two-lot product
+├── index.html           — markup for all four views (Landing, Dashboard, Insights, FEFO Matrix)
+├── style.css             — design system, layout, responsive and print rules
+├── app.js                 — CONFIG flag, CSV parsing, calculations, rendering, AI briefing, charts
+├── favicon.svg            — browser tab icon (also used as the in-app logo mark)
+├── today_data.csv         — today's inventory snapshot (read-only input)
+└── historical_data.csv    — 2019–2022 historical records (read-only input)
 ```
 
-No frameworks, no build step, no dependencies beyond the Google Fonts import in `index.html`.
+No frameworks, no build step. The only external dependencies are the Google Fonts and Chart.js CDN `<script>`/`<link>` tags already in `index.html`.
