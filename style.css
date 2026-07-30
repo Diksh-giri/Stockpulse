@@ -526,7 +526,7 @@ ul {
 }
 
 .urgent-done-cell {
-  width: 32px;
+  white-space: nowrap;
 }
 
 /* ---------------- Badges ---------------- */
@@ -728,67 +728,49 @@ ul {
   color: var(--text-muted);
 }
 
-.review-toggle {
-  position: relative;
+.review-toggle-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.review-toggle-input {
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.review-toggle-circle {
-  position: relative;
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border-strong);
+  gap: 6px;
+  border: 1px solid var(--border-strong);
   background: var(--surface);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 180ms ease, border-color 180ms ease, transform 150ms ease;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.review-toggle-input:checked + .review-toggle-circle {
-  background: var(--purple);
+.review-toggle-btn:hover {
   border-color: var(--purple);
-  transform: scale(1.08);
+  color: var(--purple-dark);
 }
 
-.review-toggle-circle svg {
-  opacity: 0;
-  transform: scale(0.4);
-  transition: opacity 150ms ease 60ms, transform 150ms ease 60ms;
-}
-
-.review-toggle-input:checked + .review-toggle-circle svg {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.review-toggle-input:hover + .review-toggle-circle {
-  border-color: var(--purple);
-}
-
-.review-toggle-input:focus-visible + .review-toggle-circle {
+.review-toggle-btn:focus-visible {
   outline: 2px solid var(--purple-light);
   outline-offset: 2px;
 }
 
-.review-toggle-text {
-  color: var(--text-secondary);
+.review-toggle-btn.is-reviewed {
+  background: var(--teal-light);
+  border-color: #5DCAA5;
+  color: var(--teal);
+}
+
+.review-toggle-btn.is-reviewed:hover {
+  border-color: var(--teal);
+}
+
+.review-toggle-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.review-toggle-btn svg {
+  flex-shrink: 0;
 }
 
 .review-footer {
