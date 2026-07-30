@@ -361,12 +361,13 @@ function getFilteredRows() {
   return rows;
 }
 
-// Builds the reason text + key number for a single product card based on its flag.
+// Builds the reason text + labeled key number for a single product card based on its flag.
 function buildReason(r) {
   if (r.flag === 'RESTOCK') {
     return {
       text: `Runs out in ${Math.max(Math.round(r.days_remaining), 0)} days. Order ${r.reorder_quantity} ${r.unit}.`,
       keyNumber: r.reorder_quantity,
+      keyLabel: `${r.unit} to order`,
       colorClass: 'text-red',
     };
   }
@@ -374,6 +375,7 @@ function buildReason(r) {
     return {
       text: `${Math.max(Math.round(r.units_expiring_unsold), 0)} ${r.unit} expire in ${r.days_until_expiry} days before they sell.`,
       keyNumber: r.days_until_expiry,
+      keyLabel: 'days left',
       colorClass: 'text-amber',
     };
   }
@@ -381,10 +383,11 @@ function buildReason(r) {
     return {
       text: `${Math.round(r.days_remaining)} days of stock. Skip reorder this cycle.`,
       keyNumber: Math.round(r.days_remaining),
+      keyLabel: 'days of stock',
       colorClass: 'text-green',
     };
   }
-  return { text: 'No action needed right now.', keyNumber: '—', colorClass: 'text-muted' };
+  return { text: 'No action needed right now.', keyNumber: '—', keyLabel: '', colorClass: 'text-muted' };
 }
 
 // Renders the filtered product feed as expandable cards with review checkboxes.
@@ -408,7 +411,10 @@ function renderFeed() {
       </div>
       <div class="card-main">
         <p class="card-reason">${reason.text}</p>
-        <span class="card-key-number ${reason.colorClass}">${reason.keyNumber}</span>
+        <div class="card-key-stat">
+          <span class="card-key-number ${reason.colorClass}">${reason.keyNumber}</span>
+          ${reason.keyLabel ? `<span class="card-key-label">${escapeHtml(reason.keyLabel)}</span>` : ''}
+        </div>
       </div>
       <button class="details-toggle" data-batch="${r.batch_id}">View details</button>
       <div class="card-details" id="details-${r.batch_id}" style="display:none;">
